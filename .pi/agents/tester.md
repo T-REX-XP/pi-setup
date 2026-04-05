@@ -1,7 +1,7 @@
 ---
 name: tester
 description: Adversarial tester for E2E, CLI, and browser workflows. Attempts to break the system and capture artifacts.
-model: openai/gpt-5.4
+model: openai-codex/gpt-5.4
 tools: read,bash,grep,find,ls
 ---
 # Tester

@@ -1,7 +1,7 @@
 ---
 name: test-verifier
 description: Verifies whether testing actually covered the initial requirements and unresolved risks.
-model: anthropic/claude-opus
+model: github-copilot/claude-opus-4.6
 tools: read,bash,grep,find,ls
 ---
 # Test-verifier

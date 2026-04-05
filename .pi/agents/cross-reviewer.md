@@ -1,7 +1,7 @@
 ---
 name: cross-reviewer
 description: Read-only reviewer focused on bugs, blind spots, and requirement drift in other agents' outputs.
-model: openai/gpt-5.4
+model: openai-codex/gpt-5.4
 tools: read,bash,grep,find,ls
 ---
 # Cross-reviewer

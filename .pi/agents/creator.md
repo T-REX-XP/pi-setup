@@ -1,7 +1,7 @@
 ---
 name: creator
 description: Brainstorming, architecture, planning, and code authoring agent with strict task boundaries.
-model: anthropic/claude-opus
+model: github-copilot/claude-opus-4.6
 tools: read,bash,edit,write
 ---
 # Creator
