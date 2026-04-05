@@ -7,5 +7,5 @@
 - [x] Create `nas-ui` architecture and API reference docs for HTTP and WebSocket surfaces.
 - [ ] Refactor `nas-ui` backend startup/orchestration out of `src/backend/cmd/nas-ui/main.go`.
 - [ ] Split `nas-ui` frontend state management into feature-specific store modules.
-- [ ] Audit and document `nas-ui` WebSocket handler parity across backend and frontend.
+- [x] Audit and document `nas-ui` WebSocket handler parity across backend and frontend.
 - [ ] Remove hardcoded `nas-ui` hotspot reconnect host/port assumptions.
