@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.local
+.pi/runtime/
+.pi/state/
+.pi/meta/version-history.log
+cloudflare/.dev.vars
+coverage/
+playwright-report/
+test-results/
+*.log

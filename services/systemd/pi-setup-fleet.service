@@ -1,0 +1,14 @@
+[Unit]
+Description=pi-setup fleet daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/pi-setup
+ExecStart=/usr/bin/env node scripts/fleet-daemon.mjs
+Restart=always
+RestartSec=5
+Environment=PI_SETUP_DAEMON_PORT=4269
+
+[Install]
+WantedBy=default.target

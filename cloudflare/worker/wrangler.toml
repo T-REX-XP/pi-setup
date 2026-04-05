@@ -1,0 +1,10 @@
+name = "pi-setup-secrets"
+main = "src/index.ts"
+compatibility_date = "2026-04-05"
+
+[[kv_namespaces]]
+binding = "PI_SETUP_SECRETS"
+id = "replace-with-kv-id"
+
+[vars]
+PI_SETUP_ALLOWED_ORIGIN = "*"

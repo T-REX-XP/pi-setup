@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+node scripts/bump-version.mjs >/dev/null
+git add .pi/meta/version.json
