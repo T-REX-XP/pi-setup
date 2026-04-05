@@ -71,6 +71,128 @@ function parseFrontmatter(raw: string): { frontmatter: Record<string, string>; b
   return { frontmatter, body };
 }
 
+type ReviewFinding = {
+  vector: string;
+  raw: string;
+  normalized: string;
+  severity: string;
+  evidence?: string;
+  recommendation?: string;
+  fingerprint: string;
+  tokens: string[];
+};
+
+type FindingCluster = {
+  id: string;
+  vectors: string[];
+  findings: ReviewFinding[];
+  representative: ReviewFinding;
+};
+
+const REVIEW_STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "in", "is", "it", "of", "on", "or", "that", "the", "to", "with",
+  "severity", "evidence", "recommendation", "review", "finding", "issue", "risk", "bug", "blind", "spot",
+]);
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeFindingText(value: string): string {
+  return normalizeWhitespace(value.toLowerCase().replace(/^[\-•*\d.)\s]+/, "").replace(/[`'"]/g, ""));
+}
+
+function tokenizeFinding(value: string): string[] {
+  return Array.from(new Set(
+    normalizeFindingText(value)
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 3 && !REVIEW_STOPWORDS.has(token))
+  )).sort();
+}
+
+function fingerprintFinding(value: string): string {
+  return tokenizeFinding(value).join("|");
+}
+
+function jaccardSimilarity(left: string[], right: string[]): number {
+  if (!left.length || !right.length) return 0;
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  let intersection = 0;
+  for (const token of leftSet) {
+    if (rightSet.has(token)) intersection += 1;
+  }
+  const union = new Set([...leftSet, ...rightSet]).size;
+  return union ? intersection / union : 0;
+}
+
+function parseSeverity(value: string): string {
+  const match = value.match(/severity\s*[:=-]\s*([^;|]+?)(?=(?:\s+evidence\s*[:=-])|(?:\s+recommendation\s*[:=-])|$)/i);
+  return normalizeWhitespace(match?.[1] || "unknown");
+}
+
+function parseEvidence(value: string): string | undefined {
+  const match = value.match(/evidence\s*[:=-]\s*([^;|]+?)(?=(?:\s+recommendation\s*[:=-])|$)/i);
+  const parsed = normalizeWhitespace(match?.[1] || "");
+  return parsed || undefined;
+}
+
+function parseRecommendation(value: string): string | undefined {
+  const match = value.match(/recommendation\s*[:=-]\s*(.+)$/i);
+  const parsed = normalizeWhitespace(match?.[1] || "");
+  return parsed || undefined;
+}
+
+function parseReviewFindings(vector: string, output: string): ReviewFinding[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => /^[\-*•]/.test(line) || /^\d+[.)]\s+/.test(line) || /severity\s*[:=-]/i.test(line))
+    .map((raw) => ({
+      vector,
+      raw,
+      normalized: normalizeFindingText(raw),
+      severity: parseSeverity(raw),
+      evidence: parseEvidence(raw),
+      recommendation: parseRecommendation(raw),
+      fingerprint: fingerprintFinding(raw),
+      tokens: tokenizeFinding(raw),
+    }))
+    .filter((finding) => finding.normalized.length > 0);
+}
+
+function clusterReviewFindings(findings: ReviewFinding[]): FindingCluster[] {
+  const clusters: FindingCluster[] = [];
+  for (const finding of findings) {
+    const existing = clusters.find((cluster) => {
+      const sameFingerprint = cluster.findings.some((candidate) => candidate.fingerprint && candidate.fingerprint === finding.fingerprint);
+      if (sameFingerprint) return true;
+      return cluster.findings.some((candidate) => jaccardSimilarity(candidate.tokens, finding.tokens) >= 0.55);
+    });
+    if (existing) {
+      existing.findings.push(finding);
+      if (!existing.vectors.includes(finding.vector)) existing.vectors.push(finding.vector);
+      continue;
+    }
+    clusters.push({
+      id: finding.fingerprint || `${finding.vector}:${clusters.length}`,
+      vectors: [finding.vector],
+      findings: [finding],
+      representative: finding,
+    });
+  }
+  return clusters.sort((left, right) => right.findings.length - left.findings.length || left.representative.normalized.localeCompare(right.representative.normalized));
+}
+
+function formatFindingCluster(cluster: FindingCluster, index: number): string {
+  const representative = cluster.representative;
+  const alternateCount = Math.max(cluster.findings.length - 1, 0);
+  const evidence = representative.evidence ? `\n  Evidence: ${representative.evidence}` : "";
+  const recommendation = representative.recommendation ? `\n  Recommendation: ${representative.recommendation}` : "";
+  return `- Cluster ${index + 1} [${cluster.vectors.join(", ")}] (${cluster.findings.length} related finding${cluster.findings.length === 1 ? "" : "s"})\n  Severity: ${representative.severity}\n  Finding: ${representative.raw.replace(/^[\-•*\d.)\s]+/, "")}${evidence}${recommendation}${alternateCount ? `\n  Similar variants: ${alternateCount}` : ""}`;
+}
+
 async function listFilesSafe(dir: string): Promise<string[]> {
   try {
     return await fs.readdir(dir);
@@ -394,14 +516,21 @@ export default function (pi: ExtensionAPI) {
       output: await runNamedAgent("cross-reviewer", reviewVectorsPrompt(objective, artifact, objective, priorResults, vector)),
     })));
 
-    const deduped = Array.from(new Set(outputs.flatMap((item) => item.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))));
+    const findings = outputs.flatMap((item) => parseReviewFindings(item.vector, item.output));
+    const clusters = clusterReviewFindings(findings);
+    const exactUniqueLines = Array.from(new Set(outputs.flatMap((item) => item.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))));
     const merged = outputs.map((item) => `### ${item.vector}\n${item.output}`).join("\n\n");
-    const dedupeSection = deduped.map((line) => `- ${line}`).join("\n");
+    const clusterSection = clusters.length
+      ? clusters.map((cluster, index) => formatFindingCluster(cluster, index)).join("\n")
+      : "- No structured findings extracted for clustering.";
+    const exactSection = exactUniqueLines.length
+      ? exactUniqueLines.map((line) => `- ${line}`).join("\n")
+      : "- No findings.";
 
     pi.sendMessage({
       customType: "parallel-review",
       display: true,
-      content: `## Parallel Review\n\n${merged}\n\n## Deduplicated Findings\n${dedupeSection || "- No findings."}`,
+      content: `## Parallel Review\n\n${merged}\n\n## Semantic Clusters\n${clusterSection}\n\n## Exact Unique Lines\n${exactSection}`,
     }, { triggerTurn: false });
   }
 
