@@ -29,7 +29,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [x] Add CI coverage reporting and fail pull requests when the configured frontend or backend quality thresholds regress.
 - [x] Replace remaining implicit frontend/backend contract assumptions with shared typed message schemas or generated protocol docs.
 - [x] Add resilient error states and retry UX for websocket disconnects, slow device commands, and partial backend failures.
-- [ ] Expand backend tests around websocket handlers, network edge cases, and service/storage command failures.
+- [x] Expand backend tests around websocket handlers, network edge cases, and service/storage command failures.
 - [ ] Increase frontend test breadth beyond the current focused surfaces to cover auth flows, websocket handling, and page-level behavior.
 - [ ] Break down remaining large modules with mixed responsibilities into smaller units with explicit interfaces.
 
