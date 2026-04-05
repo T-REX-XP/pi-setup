@@ -5,7 +5,7 @@
 Build `pi.dev` into an operator-friendly automation and fleet-management workspace, while evolving `nas-ui` into a reliable, low-friction local-first appliance UI for storage, networking, services, and device administration on constrained hardware.
 
 ## Completed
-
+- [ ] Implement Webbrowser/playwrigth support for current setup of pi.dev 
 - [x] Add signed machine enrollment with short-lived bootstrap tokens issued from the Worker.
 - [x] Push daemon heartbeats to the Worker for centralized fleet dashboards.
 - [x] Add richer review deduplication using semantic clustering.
@@ -41,7 +41,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [ ] Improve observability with structured logs, request correlation, websocket event tracing, and operator-facing diagnostics.
 
 ### Phase 3 — Product UX
-
+- [x] Add file icons: text/img/video/pdf/etc.... to the file gallery in the frontend app
 - [x] Implement preview/thumbnails for the images, follow best practices of the thumbnail generation. 
 - [ ] Add mobile-friendly onboarding for first boot, network setup, storage initialization, and service enablement. it must be a feature with turn on/off logic via the config.
 - [ ] Add notifications/alerting for disk pressure, offline nodes, hotspot state changes, failed jobs, and update availability.
