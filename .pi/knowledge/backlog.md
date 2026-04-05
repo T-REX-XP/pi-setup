@@ -8,4 +8,5 @@
 - [ ] Refactor `nas-ui` backend startup/orchestration out of `src/backend/cmd/nas-ui/main.go`.
 - [ ] Split `nas-ui` frontend state management into feature-specific store modules.
 - [x] Audit and document `nas-ui` WebSocket handler parity across backend and frontend.
-- [ ] Remove hardcoded `nas-ui` hotspot reconnect host/port assumptions.
+- [x] Remove hardcoded `nas-ui` hotspot reconnect host/port assumptions.
+- [ ] fix the WebSocket ERROR payload shape mismatch next.     
