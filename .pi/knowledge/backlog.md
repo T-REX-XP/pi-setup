@@ -36,13 +36,13 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 ### Phase 2 — Security
 
 - [x] Add stronger security defaults: tighter CSRF/session controls, safer local token handling, audit logging, and permission boundaries.
-- [ ] Add role-based auth/session hardening for local admin, remote admin, and read-only viewers.
+- [x] Add role-based auth/session hardening for local admin, remote admin, and read-only viewers.
 - [ ] Add authenticated file browsing, upload, download, rename, move, and delete flows in `nas-ui`.
 - [ ] Improve observability with structured logs, request correlation, websocket event tracing, and operator-facing diagnostics.
 
 ### Phase 3 — Product UX
 
-- [ ] Add mobile-friendly onboarding for first boot, network setup, storage initialization, and service enablement.
+- [ ] Add mobile-friendly onboarding for first boot, network setup, storage initialization, and service enablement. it must be a feature with turn on/off logic via the config.
 - [ ] Add notifications/alerting for disk pressure, offline nodes, hotspot state changes, failed jobs, and update availability.
 - [ ] Add job history and activity timeline for copy operations, network changes, updates, and administrative actions.
 - [ ] Add user-visible storage health reporting: SMART status, temperature, filesystem usage trends, and disk failure warnings.
