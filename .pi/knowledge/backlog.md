@@ -37,7 +37,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 
 - [x] Add stronger security defaults: tighter CSRF/session controls, safer local token handling, audit logging, and permission boundaries.
 - [x] Add role-based auth/session hardening for local admin, remote admin, and read-only viewers.
-- [ ] Add authenticated file browsing, upload, download, rename, move, and delete flows in `nas-ui`.
+- [x] Add authenticated file browsing, upload, download, rename, move, and delete flows in `nas-ui`.
 - [ ] Improve observability with structured logs, request correlation, websocket event tracing, and operator-facing diagnostics.
 
 ### Phase 3 — Product UX
