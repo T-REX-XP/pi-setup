@@ -12,4 +12,4 @@
 - [x] fix the WebSocket ERROR payload shape mismatch next.
 - [x] Consolidate `nas-ui` frontend WebSocket message handling and remove component-level `onmessage` overrides.
 - [x] Add Unit test for the backend app (go)
-- [ ] Add frontend test coverage for the `nas-ui` Svelte app.
+- [x] Add frontend test coverage for the `nas-ui` Svelte app.
