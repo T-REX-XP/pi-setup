@@ -31,7 +31,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [x] Add resilient error states and retry UX for websocket disconnects, slow device commands, and partial backend failures.
 - [x] Expand backend tests around websocket handlers, network edge cases, and service/storage command failures.
 - [x] Increase frontend test breadth beyond the current focused surfaces to cover auth flows, websocket handling, and page-level behavior.
-- [ ] Break down remaining large modules with mixed responsibilities into smaller units with explicit interfaces.
+- [x] Break down remaining large modules with mixed responsibilities into smaller units with explicit interfaces.
 
 ### Phase 2 — Security
 
