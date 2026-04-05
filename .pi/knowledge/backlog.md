@@ -11,3 +11,4 @@
 - [x] Remove hardcoded `nas-ui` hotspot reconnect host/port assumptions.
 - [x] fix the WebSocket ERROR payload shape mismatch next.
 - [x] Consolidate `nas-ui` frontend WebSocket message handling and remove component-level `onmessage` overrides.
+- [x] Add Unit test for the backend app (go)
