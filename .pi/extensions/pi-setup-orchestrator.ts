@@ -607,7 +607,28 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("No pending workflow.", "info");
         return;
       }
-      ctx.ui.notify(`${pendingWorkflow.kind}: ${pendingWorkflow.currentIndex}/${pendingWorkflow.phases.length} complete`, "info");
+      ctx.ui.notify(`${pendingWorkflow.kind}: ${pendingWorkflow.currentIndex}/${pendingWorkflow.phases.length} complete — ${pendingWorkflow.objective}`, "info");
+    },
+  });
+
+  pi.registerCommand("workflow-clear", {
+    description: "Clear a stale pending workflow",
+    handler: async (_args, ctx) => {
+      await loadPendingWorkflow();
+      if (!pendingWorkflow) {
+        ctx.ui.notify("No pending workflow.", "info");
+        return;
+      }
+      const cleared = pendingWorkflow;
+      pendingWorkflow = null;
+      await savePendingWorkflow();
+      await appendHistory({
+        type: "workflow-cleared",
+        workflowId: cleared.id,
+        workflow: cleared.kind,
+        objective: cleared.objective,
+      });
+      ctx.ui.notify(`Cleared pending workflow: ${cleared.kind} -> ${cleared.objective}`, "info");
     },
   });
 }
