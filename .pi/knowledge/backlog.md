@@ -9,4 +9,4 @@
 - [ ] Split `nas-ui` frontend state management into feature-specific store modules.
 - [x] Audit and document `nas-ui` WebSocket handler parity across backend and frontend.
 - [x] Remove hardcoded `nas-ui` hotspot reconnect host/port assumptions.
-- [ ] fix the WebSocket ERROR payload shape mismatch next.     
+- [x] fix the WebSocket ERROR payload shape mismatch next.
