@@ -25,7 +25,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 ### Phase 1 — Core Reliability
 
 - [x] Increase `nas-ui` frontend code quality coverage to at least 80% across the intended quality gates and define exactly which metrics are enforced in CI.
-- [ ] Add a root-level quality command for `nas-ui` that runs backend tests, frontend tests, coverage, and production builds in one step.
+- [x] Add a root-level quality command for `nas-ui` that runs backend tests, frontend tests, coverage, and production builds in one step.
 - [ ] Add CI coverage reporting and fail pull requests when the configured frontend or backend quality thresholds regress.
 - [ ] Replace remaining implicit frontend/backend contract assumptions with shared typed message schemas or generated protocol docs.
 - [ ] Add resilient error states and retry UX for websocket disconnects, slow device commands, and partial backend failures.
