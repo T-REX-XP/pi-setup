@@ -20,40 +20,45 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [x] Add unit tests for the backend app.
 - [x] Add frontend test coverage for the `nas-ui` Svelte app.
 
-## Active Improvement Targets
+## Prioritized Roadmap
+
+### Phase 1 — Core Reliability
 
 - [ ] Increase `nas-ui` frontend code quality coverage to at least 80% across the intended quality gates and define exactly which metrics are enforced in CI.
 - [ ] Add a root-level quality command for `nas-ui` that runs backend tests, frontend tests, coverage, and production builds in one step.
 - [ ] Add CI coverage reporting and fail pull requests when the configured frontend or backend quality thresholds regress.
+- [ ] Replace remaining implicit frontend/backend contract assumptions with shared typed message schemas or generated protocol docs.
+- [ ] Add resilient error states and retry UX for websocket disconnects, slow device commands, and partial backend failures.
+- [ ] Expand backend tests around websocket handlers, network edge cases, and service/storage command failures.
+- [ ] Increase frontend test breadth beyond the current focused surfaces to cover auth flows, websocket handling, and page-level behavior.
+- [ ] Break down remaining large modules with mixed responsibilities into smaller units with explicit interfaces.
 
-## Possible Features
+### Phase 2 — Security
 
+- [ ] Add stronger security defaults: tighter CSRF/session controls, safer local token handling, audit logging, and permission boundaries.
+- [ ] Add role-based auth/session hardening for local admin, remote admin, and read-only viewers.
 - [ ] Add authenticated file browsing, upload, download, rename, move, and delete flows in `nas-ui`.
+- [ ] Improve observability with structured logs, request correlation, websocket event tracing, and operator-facing diagnostics.
+
+### Phase 3 — Product UX
+
+- [ ] Add mobile-friendly onboarding for first boot, network setup, storage initialization, and service enablement.
+- [ ] Add notifications/alerting for disk pressure, offline nodes, hotspot state changes, failed jobs, and update availability.
+- [ ] Add job history and activity timeline for copy operations, network changes, updates, and administrative actions.
 - [ ] Add user-visible storage health reporting: SMART status, temperature, filesystem usage trends, and disk failure warnings.
 - [ ] Add service management UI for common self-hosted apps with status, logs, restart, and enable/disable controls.
 - [ ] Add system update management with version checks, release notes, safe restart flow, and rollback guidance.
 - [ ] Add backup/restore workflows for app configuration, user data, and external storage targets.
+
+### Phase 4 — Fleet / Multi-Device Roadmap
+
 - [ ] Add multi-device/fleet view so several NAS nodes can be monitored and administered from one dashboard.
-- [ ] Add notifications/alerting for disk pressure, offline nodes, hotspot state changes, failed jobs, and update availability.
-- [ ] Add job history and activity timeline for copy operations, network changes, updates, and administrative actions.
-- [ ] Add role-based auth/session hardening for local admin, remote admin, and read-only viewers.
-- [ ] Add mobile-friendly onboarding for first boot, network setup, storage initialization, and service enablement.
-
-## Improvements / Better Implementations
-
-- [ ] Replace remaining implicit frontend/backend contract assumptions with shared typed message schemas or generated protocol docs.
-- [ ] Reduce coupling in the frontend orchestration layer by separating transport concerns from domain actions even further.
-- [ ] Add resilient error states and retry UX for websocket disconnects, slow device commands, and partial backend failures.
-- [ ] Improve observability with structured logs, request correlation, websocket event tracing, and operator-facing diagnostics.
-- [ ] Add stronger security defaults: tighter CSRF/session controls, safer local token handling, audit logging, and permission boundaries.
 - [ ] Standardize versioning and release automation across `pi.dev`, the Worker, and `nas-ui` artifacts.
+- [ ] Reduce coupling in the frontend orchestration layer by separating transport concerns from domain actions even further.
 
 ## Technical Debt
 
 - [ ] Audit `nas-ui` for stale docs, legacy file references, and naming drift left over from earlier architecture iterations.
 - [ ] Remove or rewrite compatibility barrels once all consumers are migrated to the feature-specific store modules.
-- [ ] Increase frontend test breadth beyond the current focused surfaces to cover auth flows, websocket handling, and page-level behavior.
-- [ ] Expand backend tests around websocket handlers, network edge cases, and service/storage command failures.
 - [ ] Introduce linting/formatting/typecheck enforcement where missing, and make local/CI output consistent.
 - [ ] Review embedded frontend build artifacts and generated files to ensure repository hygiene and avoid accidental source-of-truth confusion.
-- [ ] Break down remaining large modules with mixed responsibilities into smaller units with explicit interfaces.
