@@ -28,7 +28,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [x] Add a root-level quality command for `nas-ui` that runs backend tests, frontend tests, coverage, and production builds in one step.
 - [x] Add CI coverage reporting and fail pull requests when the configured frontend or backend quality thresholds regress.
 - [x] Replace remaining implicit frontend/backend contract assumptions with shared typed message schemas or generated protocol docs.
-- [ ] Add resilient error states and retry UX for websocket disconnects, slow device commands, and partial backend failures.
+- [x] Add resilient error states and retry UX for websocket disconnects, slow device commands, and partial backend failures.
 - [ ] Expand backend tests around websocket handlers, network edge cases, and service/storage command failures.
 - [ ] Increase frontend test breadth beyond the current focused surfaces to cover auth flows, websocket handling, and page-level behavior.
 - [ ] Break down remaining large modules with mixed responsibilities into smaller units with explicit interfaces.
