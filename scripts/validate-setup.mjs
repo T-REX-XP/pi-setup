@@ -9,6 +9,8 @@ const required = [
   '.pi/agents/test-verifier.md',
   '.pi/agents/improver.md',
   'cloudflare/worker/src/index.ts',
+  'scripts/enrollment-token-issue.mjs',
+  'scripts/machine-enroll.mjs',
   'install.sh'
 ];
 

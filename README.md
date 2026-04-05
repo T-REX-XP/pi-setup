@@ -35,16 +35,24 @@ Inside `pi`, use:
 - `/continue`
 
 ## Secret flow
-1. Deploy `cloudflare/worker/` with a KV namespace and `PI_SETUP_BOOTSTRAP_TOKEN` secret.
+1. Deploy `cloudflare/worker/` with a KV namespace plus `PI_SETUP_BOOTSTRAP_TOKEN` and `PI_SETUP_ENROLLMENT_SIGNING_KEY` secrets.
 2. Encrypt and upload a blob:
    ```bash
    PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... PI_SETUP_MASTER_KEY=... \
    node scripts/secrets-encrypt-upload.mjs machine-prod .env.production
    ```
-3. Pull and decrypt on a machine (including headless VPS):
+3. Existing machine pull with the admin bootstrap token:
    ```bash
    PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... PI_SETUP_MASTER_KEY=... \
    node scripts/secrets-sync.mjs machine-prod .env.runtime
+   ```
+4. New machine enrollment with a short-lived Worker-issued token:
+   ```bash
+   PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... \
+   node scripts/enrollment-token-issue.mjs machine-01 machine-prod
+
+   PI_SETUP_WORKER_URL=... PI_SETUP_ENROLLMENT_TOKEN=... PI_SETUP_MASTER_KEY=... \
+   node scripts/machine-enroll.mjs .env.runtime
    ```
 
 ## Fleet daemon

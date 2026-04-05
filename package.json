@@ -17,6 +17,8 @@
     "daemon": "node scripts/fleet-daemon.mjs",
     "fleetctl": "node scripts/fleetctl.mjs",
     "secrets:sync": "node scripts/secrets-sync.mjs",
+    "enrollment:issue": "node scripts/enrollment-token-issue.mjs",
+    "machine:enroll": "node scripts/machine-enroll.mjs",
     "validate": "node scripts/validate-setup.mjs"
   },
   "dependencies": {

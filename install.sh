@@ -34,14 +34,18 @@ Next steps:
 2. Configure Cloudflare Worker secrets:
    - export PI_SETUP_WORKER_URL=...
    - export PI_SETUP_BOOTSTRAP_TOKEN=...
+   - export PI_SETUP_ENROLLMENT_SIGNING_KEY=...   # worker deploy secret
    - export PI_SETUP_MASTER_KEY=...
 3. Upload an encrypted secret blob:
    node scripts/secrets-encrypt-upload.mjs <secret-name> <input-file>
-4. Sync secrets onto a machine:
+4. Existing machine sync:
    node scripts/secrets-sync.mjs <secret-name> [output-file]
-5. Start the fleet daemon:
+5. New machine enrollment:
+   node scripts/enrollment-token-issue.mjs <machine-id> <secret-name>
+   PI_SETUP_ENROLLMENT_TOKEN=... node scripts/machine-enroll.mjs [output-file]
+6. Start the fleet daemon:
    node scripts/fleet-daemon.mjs
-6. Validate the repo:
+7. Validate the repo:
    node scripts/validate-setup.mjs
 
 Workflow commands inside pi:
