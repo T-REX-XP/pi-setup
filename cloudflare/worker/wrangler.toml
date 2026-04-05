@@ -11,3 +11,5 @@ PI_SETUP_ALLOWED_ORIGIN = "*"
 # Required secrets:
 # - PI_SETUP_BOOTSTRAP_TOKEN
 # - PI_SETUP_ENROLLMENT_SIGNING_KEY
+# Optional usage:
+# - use PI_SETUP_BOOTSTRAP_TOKEN to post/read fleet heartbeats

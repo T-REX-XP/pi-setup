@@ -8,10 +8,15 @@ const runtimeDir = path.resolve('.pi/runtime');
 const stateFile = path.join(runtimeDir, 'fleet-daemon.json');
 const commandFile = path.join(runtimeDir, 'fleet-commands.jsonl');
 const port = Number(process.env.PI_SETUP_DAEMON_PORT || 4269);
+const heartbeatIntervalMs = Number(process.env.PI_SETUP_HEARTBEAT_INTERVAL_MS || 15000);
+const workerUrl = process.env.PI_SETUP_WORKER_URL;
+const bootstrapToken = process.env.PI_SETUP_BOOTSTRAP_TOKEN;
+const machineId = process.env.PI_SETUP_MACHINE_ID || os.hostname();
 
 async function snapshot() {
   const cpus = os.cpus();
   return {
+    machineId,
     hostname: os.hostname(),
     platform: os.platform(),
     release: os.release(),
@@ -28,13 +33,64 @@ async function snapshot() {
   };
 }
 
+async function pushHeartbeat(currentSnapshot) {
+  if (!workerUrl || !bootstrapToken) {
+    return {
+      enabled: false,
+      machineId,
+      lastAttemptAt: new Date().toISOString(),
+      lastSuccessAt: null,
+      lastError: null,
+    };
+  }
+
+  const lastAttemptAt = new Date().toISOString();
+  try {
+    const res = await fetch(`${workerUrl.replace(/\/$/, '')}/v1/fleet/heartbeat`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${bootstrapToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(currentSnapshot),
+    });
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    return {
+      enabled: true,
+      machineId,
+      lastAttemptAt,
+      lastSuccessAt: new Date().toISOString(),
+      lastError: null,
+    };
+  } catch (error) {
+    return {
+      enabled: true,
+      machineId,
+      lastAttemptAt,
+      lastSuccessAt: null,
+      lastError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function refreshState() {
+  const currentSnapshot = await snapshot();
+  const heartbeat = await pushHeartbeat(currentSnapshot);
+  return {
+    ...currentSnapshot,
+    heartbeat,
+  };
+}
+
 await mkdir(runtimeDir, { recursive: true });
-let lastSnapshot = await snapshot();
+let lastSnapshot = await refreshState();
 await writeFile(stateFile, JSON.stringify(lastSnapshot, null, 2) + '\n', 'utf8');
 setInterval(async () => {
-  lastSnapshot = await snapshot();
+  lastSnapshot = await refreshState();
   await writeFile(stateFile, JSON.stringify(lastSnapshot, null, 2) + '\n', 'utf8');
-}, 15000);
+}, heartbeatIntervalMs);
 
 const server = http.createServer(async (req, res) => {
   if (!req.url) {
@@ -54,7 +110,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.url === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'pi-setup-fleet-daemon', timestamp: new Date().toISOString() }));
+    res.end(JSON.stringify({ ok: true, service: 'pi-setup-fleet-daemon', timestamp: new Date().toISOString(), machineId, remoteHeartbeatEnabled: Boolean(workerUrl && bootstrapToken) }));
     return;
   }
   if (req.url === '/metrics') {

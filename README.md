@@ -61,3 +61,15 @@ node scripts/fleet-daemon.mjs
 node scripts/fleetctl.mjs status
 open dashboards/fleet/index.html
 ```
+
+To centralize fleet state in the Worker, start the daemon with:
+```bash
+PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... PI_SETUP_MACHINE_ID=$(hostname) \
+node scripts/fleet-daemon.mjs
+```
+
+Then query aggregated Worker heartbeats:
+```bash
+curl -H "authorization: Bearer $PI_SETUP_BOOTSTRAP_TOKEN" \
+  "$PI_SETUP_WORKER_URL/v1/fleet/heartbeats"
+```

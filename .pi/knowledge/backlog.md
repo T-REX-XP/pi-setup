@@ -1,7 +1,7 @@
 # Technical Backlog
 
 - [x] Add signed machine enrollment with short-lived bootstrap tokens issued from the Worker.
-- [ ] Push daemon heartbeats to the Worker for centralized fleet dashboards.
+- [x] Push daemon heartbeats to the Worker for centralized fleet dashboards.
 - [ ] Add richer review deduplication using semantic clustering.
 - [ ] Align `nas-ui` project documentation with the current Go + Svelte architecture.
 - [ ] Create `nas-ui` architecture and API reference docs for HTTP and WebSocket surfaces.

@@ -42,6 +42,25 @@ type EnrollmentRecord = {
   metadata?: Record<string, unknown>;
 };
 
+type FleetHeartbeat = {
+  machineId: string;
+  hostname: string;
+  platform: string;
+  release: string;
+  uptimeSeconds: number;
+  loadavg: number[];
+  memory: {
+    total: number;
+    free: number;
+    used: number;
+  };
+  cpuCount: number;
+  arch: string;
+  timestamp: string;
+  receivedAt?: string;
+  stale?: boolean;
+};
+
 const encoder = new TextEncoder();
 
 function json(data: unknown, status = 200, origin = '*') {
@@ -131,6 +150,12 @@ function isoFromSeconds(value: number) {
 
 function randomId() {
   return crypto.randomUUID();
+}
+
+function isStaleHeartbeat(timestamp: string, staleAfterMs = 60000) {
+  const seenAt = Date.parse(timestamp);
+  if (Number.isNaN(seenAt)) return true;
+  return Date.now() - seenAt > staleAfterMs;
 }
 
 async function authorizeSecretRead(request: Request, env: Env, secretName: string) {
@@ -249,6 +274,40 @@ export default {
       };
       await env.PI_SETUP_SECRETS.put(`secret:${record.name}`, JSON.stringify(record));
       return json({ ok: true, stored: record.name, updatedAt: record.updatedAt }, 200, origin);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/fleet/heartbeat') {
+      if (!isAdminAuth(auth, env)) {
+        return json({ ok: false, error: 'unauthorized' }, 401, origin);
+      }
+      const body = await readBody<FleetHeartbeat>(request);
+      if (!body.machineId || !body.hostname || !body.timestamp) {
+        return json({ ok: false, error: 'machineId, hostname, and timestamp are required' }, 400, origin);
+      }
+      const heartbeat: FleetHeartbeat = {
+        ...body,
+        receivedAt: new Date().toISOString(),
+        stale: isStaleHeartbeat(body.timestamp),
+      };
+      await env.PI_SETUP_SECRETS.put(`fleet:${heartbeat.machineId}`, JSON.stringify(heartbeat));
+      return json({ ok: true, machineId: heartbeat.machineId, receivedAt: heartbeat.receivedAt }, 200, origin);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/v1/fleet/heartbeats') {
+      if (!isAdminAuth(auth, env)) {
+        return json({ ok: false, error: 'unauthorized' }, 401, origin);
+      }
+      const list = await env.PI_SETUP_SECRETS.list({ prefix: 'fleet:' });
+      const heartbeats = await Promise.all(list.keys.map(async (key) => {
+        const value = await env.PI_SETUP_SECRETS.get(key.name, 'json') as FleetHeartbeat | null;
+        if (!value) return null;
+        return {
+          ...value,
+          stale: isStaleHeartbeat(value.timestamp),
+        };
+      }));
+      const items = heartbeats.filter((value): value is FleetHeartbeat => Boolean(value)).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      return json({ ok: true, count: items.length, heartbeats: items }, 200, origin);
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/secrets/')) {

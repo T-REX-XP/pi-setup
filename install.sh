@@ -45,6 +45,8 @@ Next steps:
    PI_SETUP_ENROLLMENT_TOKEN=... node scripts/machine-enroll.mjs [output-file]
 6. Start the fleet daemon:
    node scripts/fleet-daemon.mjs
+   # optional centralized heartbeats:
+   PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... PI_SETUP_MACHINE_ID=$(hostname) node scripts/fleet-daemon.mjs
 7. Validate the repo:
    node scripts/validate-setup.mjs
 

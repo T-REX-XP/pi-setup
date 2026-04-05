@@ -3,17 +3,92 @@
 <head>
   <meta charset="utf-8" />
   <title>pi-setup fleet dashboard</title>
-  <style>body{font-family:system-ui;max-width:900px;margin:40px auto;padding:0 16px}pre{background:#111;color:#0f0;padding:16px;overflow:auto;border-radius:8px}</style>
+  <style>
+    body{font-family:system-ui;max-width:1100px;margin:40px auto;padding:0 16px}
+    pre{background:#111;color:#0f0;padding:16px;overflow:auto;border-radius:8px}
+    .controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+    .controls label{display:flex;flex-direction:column;font-size:14px;gap:6px}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:16px 0}
+    .card{border:1px solid #ddd;border-radius:10px;padding:12px;background:#fafafa}
+    .stale{border-color:#c77;background:#fff3f3}
+    code,input,select,button{font:inherit}
+    input,select{padding:8px}
+    button{padding:8px 12px}
+  </style>
 </head>
 <body>
   <h1>pi-setup fleet dashboard</h1>
-  <p>Fetches daemon metrics from <code>http://127.0.0.1:4269/metrics</code>.</p>
+  <p>Inspect either the local daemon or centralized Worker heartbeats.</p>
+
+  <div class="controls">
+    <label>
+      Data source
+      <select id="mode">
+        <option value="local">Local daemon</option>
+        <option value="remote">Worker heartbeats</option>
+      </select>
+    </label>
+    <label>
+      Worker URL
+      <input id="workerUrl" placeholder="https://<worker-url>" />
+    </label>
+    <label>
+      Dashboard token
+      <input id="token" type="password" placeholder="Bearer token for /v1/fleet/heartbeats" />
+    </label>
+    <label>
+      Local daemon URL
+      <input id="daemonUrl" value="http://127.0.0.1:4269" />
+    </label>
+  </div>
+
   <button onclick="load()">Refresh</button>
+  <div id="cards" class="cards"></div>
   <pre id="out">Loading…</pre>
   <script>
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>\"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+    }
+
+    function renderCards(items) {
+      const cards = document.getElementById('cards');
+      if (!items.length) {
+        cards.innerHTML = '';
+        return;
+      }
+      cards.innerHTML = items.map((item) => `
+        <div class="card ${item.stale ? 'stale' : ''}">
+          <strong>${esc(item.machineId || item.hostname)}</strong><br />
+          host: <code>${esc(item.hostname)}</code><br />
+          platform: <code>${esc(item.platform)} ${esc(item.release)}</code><br />
+          load: <code>${esc((item.loadavg || []).join(', '))}</code><br />
+          memory used: <code>${esc(item.memory?.used)}</code><br />
+          updated: <code>${esc(item.timestamp)}</code><br />
+          status: <strong>${item.stale ? 'stale' : 'fresh'}</strong>
+        </div>
+      `).join('');
+    }
+
     async function load(){
-      const res = await fetch('http://127.0.0.1:4269/metrics');
-      document.getElementById('out').textContent = JSON.stringify(await res.json(), null, 2);
+      const mode = document.getElementById('mode').value;
+      const daemonUrl = document.getElementById('daemonUrl').value.replace(/\/$/, '');
+      const workerUrl = document.getElementById('workerUrl').value.replace(/\/$/, '');
+      const token = document.getElementById('token').value;
+      const out = document.getElementById('out');
+      out.textContent = 'Loading…';
+
+      const endpoint = mode === 'remote' ? `${workerUrl}/v1/fleet/heartbeats` : `${daemonUrl}/metrics`;
+      const headers = mode === 'remote' && token ? { authorization: `Bearer ${token}` } : {};
+      const res = await fetch(endpoint, { headers });
+      const data = await res.json();
+      if (!res.ok) {
+        renderCards([]);
+        out.textContent = JSON.stringify(data, null, 2);
+        return;
+      }
+      const items = mode === 'remote' ? (data.heartbeats || []) : [data];
+      renderCards(items);
+      out.textContent = JSON.stringify(data, null, 2);
     }
     load();
   </script>
