@@ -10,4 +10,4 @@
 - [x] Audit and document `nas-ui` WebSocket handler parity across backend and frontend.
 - [x] Remove hardcoded `nas-ui` hotspot reconnect host/port assumptions.
 - [x] fix the WebSocket ERROR payload shape mismatch next.
-- [ ] Consolidate `nas-ui` frontend WebSocket message handling and remove component-level `onmessage` overrides.
+- [x] Consolidate `nas-ui` frontend WebSocket message handling and remove component-level `onmessage` overrides.
