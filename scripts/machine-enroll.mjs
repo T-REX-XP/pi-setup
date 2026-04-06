@@ -14,11 +14,13 @@ if (!workerUrl || !enrollmentToken || !passphrase) {
   process.exit(1);
 }
 
+const enrollRequestId = crypto.randomUUID();
 const enrollRes = await fetch(`${workerUrl.replace(/\/$/, '')}/v1/machines/enroll`, {
   method: 'POST',
   headers: {
     authorization: `Bearer ${enrollmentToken}`,
-    'content-type': 'application/json'
+    'content-type': 'application/json',
+    'x-request-id': enrollRequestId,
   },
   body: JSON.stringify({
     hostname: os.hostname(),
@@ -35,8 +37,12 @@ const enrollPayload = await enrollRes.json();
 const bootstrapToken = enrollPayload.bootstrapToken;
 const secretName = enrollPayload.secretName;
 
+const secretRequestId = crypto.randomUUID();
 const secretRes = await fetch(`${workerUrl.replace(/\/$/, '')}/v1/secrets/${encodeURIComponent(secretName)}`, {
-  headers: { authorization: `Bearer ${bootstrapToken}` }
+  headers: {
+    authorization: `Bearer ${bootstrapToken}`,
+    'x-request-id': secretRequestId,
+  }
 });
 if (!secretRes.ok) {
   console.error(await secretRes.text());

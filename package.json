@@ -19,6 +19,7 @@
     "secrets:sync": "node scripts/secrets-sync.mjs",
     "enrollment:issue": "node scripts/enrollment-token-issue.mjs",
     "machine:enroll": "node scripts/machine-enroll.mjs",
+    "trace:websocket": "node scripts/websocket-event-trace.mjs",
     "validate": "node scripts/validate-setup.mjs"
   },
   "dependencies": {

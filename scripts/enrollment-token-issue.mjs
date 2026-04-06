@@ -10,11 +10,13 @@ if (!workerUrl || !adminToken || !machineId || !secretName) {
   process.exit(1);
 }
 
+const requestId = crypto.randomUUID();
 const res = await fetch(`${workerUrl.replace(/\/$/, '')}/v1/enrollment-tokens/issue`, {
   method: 'POST',
   headers: {
     authorization: `Bearer ${adminToken}`,
-    'content-type': 'application/json'
+    'content-type': 'application/json',
+    'x-request-id': requestId,
   },
   body: JSON.stringify({ machineId, secretName, ttlSeconds })
 });

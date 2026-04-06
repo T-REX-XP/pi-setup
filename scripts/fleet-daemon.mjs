@@ -13,6 +13,21 @@ const workerUrl = process.env.PI_SETUP_WORKER_URL;
 const bootstrapToken = process.env.PI_SETUP_BOOTSTRAP_TOKEN;
 const machineId = process.env.PI_SETUP_MACHINE_ID || os.hostname();
 
+function log(level, event, details = {}) {
+  console[level](JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    event,
+    machineId,
+    port,
+    ...details,
+  }));
+}
+
+function requestId(req) {
+  return req.headers['x-request-id'] || crypto.randomUUID();
+}
+
 async function snapshot() {
   const cpus = os.cpus();
   return {
@@ -41,36 +56,53 @@ async function pushHeartbeat(currentSnapshot) {
       lastAttemptAt: new Date().toISOString(),
       lastSuccessAt: null,
       lastError: null,
+      lastRequestId: null,
     };
   }
 
   const lastAttemptAt = new Date().toISOString();
+  const correlationId = crypto.randomUUID();
   try {
     const res = await fetch(`${workerUrl.replace(/\/$/, '')}/v1/fleet/heartbeat`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${bootstrapToken}`,
         'content-type': 'application/json',
+        'x-request-id': correlationId,
       },
       body: JSON.stringify(currentSnapshot),
     });
+    const payload = await res.json().catch(() => null);
     if (!res.ok) {
-      throw new Error(await res.text());
+      throw new Error(payload?.error || JSON.stringify(payload) || `HTTP ${res.status}`);
     }
+    log('info', 'heartbeat.push.ok', {
+      requestId: payload?.requestId || correlationId,
+      remoteRequestId: payload?.requestId || null,
+      status: res.status,
+      hostname: currentSnapshot.hostname,
+    });
     return {
       enabled: true,
       machineId,
       lastAttemptAt,
       lastSuccessAt: new Date().toISOString(),
       lastError: null,
+      lastRequestId: payload?.requestId || correlationId,
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log('error', 'heartbeat.push.failed', {
+      requestId: correlationId,
+      error: message,
+    });
     return {
       enabled: true,
       machineId,
       lastAttemptAt,
       lastSuccessAt: null,
-      lastError: error instanceof Error ? error.message : String(error),
+      lastError: message,
+      lastRequestId: correlationId,
     };
   }
 }
@@ -81,6 +113,12 @@ async function refreshState() {
   return {
     ...currentSnapshot,
     heartbeat,
+    diagnostics: {
+      daemonPort: port,
+      heartbeatIntervalMs,
+      workerConfigured: Boolean(workerUrl && bootstrapToken),
+      lastRefreshedAt: new Date().toISOString(),
+    },
   };
 }
 
@@ -88,48 +126,95 @@ await mkdir(runtimeDir, { recursive: true });
 let lastSnapshot = await refreshState();
 await writeFile(stateFile, JSON.stringify(lastSnapshot, null, 2) + '\n', 'utf8');
 setInterval(async () => {
-  lastSnapshot = await refreshState();
-  await writeFile(stateFile, JSON.stringify(lastSnapshot, null, 2) + '\n', 'utf8');
+  try {
+    lastSnapshot = await refreshState();
+    await writeFile(stateFile, JSON.stringify(lastSnapshot, null, 2) + '\n', 'utf8');
+  } catch (error) {
+    log('error', 'state.refresh.failed', { error: error instanceof Error ? error.message : String(error) });
+  }
 }, heartbeatIntervalMs);
 
 const server = http.createServer(async (req, res) => {
+  const reqId = requestId(req);
+  const respond = (status, body) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'x-request-id': String(reqId) });
+    res.end(JSON.stringify(body, null, 2));
+  };
+
   if (!req.url) {
-    res.writeHead(400).end('missing url');
+    respond(400, { ok: false, error: 'missing url', requestId: reqId });
     return;
   }
+
+  log('info', 'http.request', { requestId: reqId, method: req.method, path: req.url });
+
   if (req.method === 'POST' && req.url === '/manage') {
     let body = '';
     req.on('data', (chunk) => { body += String(chunk); });
     req.on('end', async () => {
       const command = body || '{}';
       await writeFile(commandFile, `${new Date().toISOString()} ${command}\n`, { flag: 'a' });
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, accepted: true }));
+      log('info', 'daemon.command.accepted', { requestId: reqId, bytes: command.length });
+      respond(200, { ok: true, accepted: true, requestId: reqId });
     });
     return;
   }
+
   if (req.url === '/health') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'pi-setup-fleet-daemon', timestamp: new Date().toISOString(), machineId, remoteHeartbeatEnabled: Boolean(workerUrl && bootstrapToken) }));
+    respond(200, {
+      ok: true,
+      service: 'pi-setup-fleet-daemon',
+      timestamp: new Date().toISOString(),
+      machineId,
+      remoteHeartbeatEnabled: Boolean(workerUrl && bootstrapToken),
+      requestId: reqId,
+    });
     return;
   }
+
   if (req.url === '/metrics') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(lastSnapshot, null, 2));
+    respond(200, { ...lastSnapshot, requestId: reqId });
     return;
   }
-  if (req.url === '/state') {
-    res.writeHead(200, { 'content-type': 'application/json' });
+
+  if (req.url === '/diagnostics') {
+    let commandsQueued = 0;
     try {
+      const commandLog = await readFile(commandFile, 'utf8');
+      commandsQueued = commandLog.trim() ? commandLog.trim().split('\n').length : 0;
+    } catch {
+      commandsQueued = 0;
+    }
+    respond(200, {
+      ok: true,
+      requestId: reqId,
+      diagnostics: {
+        machineId,
+        daemonPort: port,
+        heartbeatIntervalMs,
+        workerConfigured: Boolean(workerUrl && bootstrapToken),
+        commandLogPath: commandFile,
+        commandsQueued,
+        latestStatePath: stateFile,
+        lastSnapshot,
+      },
+    });
+    return;
+  }
+
+  if (req.url === '/state') {
+    try {
+      res.writeHead(200, { 'content-type': 'application/json', 'x-request-id': String(reqId) });
       res.end(await readFile(stateFile, 'utf8'));
     } catch {
-      res.end(JSON.stringify(lastSnapshot, null, 2));
+      respond(200, { ...lastSnapshot, requestId: reqId });
     }
     return;
   }
-  res.writeHead(404).end('not found');
+
+  respond(404, { ok: false, error: 'not found', requestId: reqId });
 });
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`pi-setup fleet daemon listening on http://127.0.0.1:${port}`);
+  log('info', 'daemon.started', { listen: `http://127.0.0.1:${port}`, workerConfigured: Boolean(workerUrl && bootstrapToken) });
 });

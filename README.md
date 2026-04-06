@@ -59,6 +59,7 @@ Inside `pi`, use:
 ```bash
 node scripts/fleet-daemon.mjs
 node scripts/fleetctl.mjs status
+node scripts/fleetctl.mjs diagnostics
 open dashboards/fleet/index.html
 ```
 
@@ -73,3 +74,5 @@ Then query aggregated Worker heartbeats:
 curl -H "authorization: Bearer $PI_SETUP_BOOTSTRAP_TOKEN" \
   "$PI_SETUP_WORKER_URL/v1/fleet/heartbeats"
 ```
+
+The Worker now adds structured JSON logs, propagates `x-request-id` correlation IDs, records websocket trace events through `/v1/observability/websocket-events`, and exposes operator diagnostics at `/v1/diagnostics`.

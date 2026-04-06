@@ -61,18 +61,38 @@ type FleetHeartbeat = {
   stale?: boolean;
 };
 
-const encoder = new TextEncoder();
+type WebsocketTraceEvent = {
+  machineId: string;
+  connectionId?: string;
+  direction: 'in' | 'out' | 'system';
+  eventType: string;
+  payloadSize?: number;
+  status?: 'ok' | 'error';
+  metadata?: Record<string, unknown>;
+  timestamp?: string;
+  requestId?: string;
+};
 
-function json(data: unknown, status = 200, origin = '*') {
-  return new Response(JSON.stringify(data, null, 2), {
-    status,
-    headers: {
-      'content-type': 'application/json',
-      'access-control-allow-origin': origin,
-      'access-control-allow-headers': 'authorization, content-type',
-      'access-control-allow-methods': 'GET,POST,OPTIONS'
-    }
-  });
+type RequestContext = {
+  requestId: string;
+  origin: string;
+  method: string;
+  path: string;
+};
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const MAX_TRACE_LIST_LIMIT = 100;
+
+function json(data: unknown, status = 200, origin = '*', requestId?: string) {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'access-control-allow-origin': origin,
+    'access-control-allow-headers': 'authorization, content-type, x-request-id',
+    'access-control-allow-methods': 'GET,POST,OPTIONS'
+  };
+  if (requestId) headers['x-request-id'] = requestId;
+  return new Response(JSON.stringify(data, null, 2), { status, headers });
 }
 
 async function readBody<T>(request: Request): Promise<T> {
@@ -128,7 +148,7 @@ async function verifyToken(token: string, secret: string): Promise<SignedTokenPa
   );
   if (!valid) return null;
   try {
-    const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(encodedPayload))) as SignedTokenPayload;
+    const payload = JSON.parse(decoder.decode(b64urlDecode(encodedPayload))) as SignedTokenPayload;
     if (!payload.typ || !payload.jti || !payload.machineId || !payload.secretName || !payload.iat || !payload.exp) return null;
     return payload;
   } catch {
@@ -158,175 +178,317 @@ function isStaleHeartbeat(timestamp: string, staleAfterMs = 60000) {
   return Date.now() - seenAt > staleAfterMs;
 }
 
-async function authorizeSecretRead(request: Request, env: Env, secretName: string) {
+function requestContext(request: Request, origin: string): RequestContext {
+  const url = new URL(request.url);
+  return {
+    requestId: request.headers.get('x-request-id') || crypto.randomUUID(),
+    origin,
+    method: request.method,
+    path: url.pathname,
+  };
+}
+
+function log(level: 'info' | 'warn' | 'error', event: string, ctx: RequestContext, details: Record<string, unknown> = {}) {
+  console[level](JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    event,
+    requestId: ctx.requestId,
+    method: ctx.method,
+    path: ctx.path,
+    ...details,
+  }));
+}
+
+function response(ctx: RequestContext, payload: unknown, status = 200) {
+  return json(payload, status, ctx.origin, ctx.requestId);
+}
+
+function unauthorized(ctx: RequestContext, error = 'unauthorized') {
+  return response(ctx, { ok: false, error, requestId: ctx.requestId }, 401);
+}
+
+async function authorizeSecretRead(request: Request, env: Env, secretName: string, ctx: RequestContext) {
   const auth = request.headers.get('authorization');
   if (isAdminAuth(auth, env)) return { ok: true as const, machineId: null };
 
   const token = bearerToken(auth);
-  if (!token) return { ok: false as const, response: json({ ok: false, error: 'unauthorized' }, 401, env.PI_SETUP_ALLOWED_ORIGIN || '*') };
+  if (!token) return { ok: false as const, response: unauthorized(ctx) };
 
   const payload = await verifyToken(token, env.PI_SETUP_ENROLLMENT_SIGNING_KEY);
   if (!payload || payload.typ !== 'bootstrap') {
-    return { ok: false as const, response: json({ ok: false, error: 'unauthorized' }, 401, env.PI_SETUP_ALLOWED_ORIGIN || '*') };
+    return { ok: false as const, response: unauthorized(ctx) };
   }
   if (payload.exp < nowSeconds()) {
-    return { ok: false as const, response: json({ ok: false, error: 'bootstrap token expired' }, 401, env.PI_SETUP_ALLOWED_ORIGIN || '*') };
+    return { ok: false as const, response: response(ctx, { ok: false, error: 'bootstrap token expired', requestId: ctx.requestId }, 401) };
   }
   if (payload.secretName !== secretName) {
-    return { ok: false as const, response: json({ ok: false, error: 'secret not allowed for token' }, 403, env.PI_SETUP_ALLOWED_ORIGIN || '*') };
+    return { ok: false as const, response: response(ctx, { ok: false, error: 'secret not allowed for token', requestId: ctx.requestId }, 403) };
   }
   return { ok: true as const, machineId: payload.machineId };
+}
+
+async function requireAdmin(request: Request, env: Env, ctx: RequestContext) {
+  if (!isAdminAuth(request.headers.get('authorization'), env)) {
+    log('warn', 'auth.unauthorized', ctx);
+    return { ok: false as const, response: unauthorized(ctx) };
+  }
+  return { ok: true as const };
+}
+
+async function listJsonByPrefix<T>(env: Env, prefix: string, limit = MAX_TRACE_LIST_LIMIT): Promise<T[]> {
+  const list = await env.PI_SETUP_SECRETS.list({ prefix, limit: Math.min(limit, MAX_TRACE_LIST_LIMIT) });
+  const items = await Promise.all(list.keys.map(async (key) => await env.PI_SETUP_SECRETS.get(key.name, 'json') as T | null));
+  return items.filter((value): value is T => Boolean(value));
+}
+
+function traceKey(timestamp: string) {
+  return `ws-event:${timestamp}:${randomId()}`;
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = env.PI_SETUP_ALLOWED_ORIGIN || '*';
-    if (request.method === 'OPTIONS') return json({ ok: true }, 200, origin);
-
+    const ctx = requestContext(request, origin);
     const url = new URL(request.url);
-    const auth = request.headers.get('authorization');
 
-    if (request.method === 'POST' && url.pathname === '/v1/enrollment-tokens/issue') {
-      if (!isAdminAuth(auth, env)) {
-        return json({ ok: false, error: 'unauthorized' }, 401, origin);
-      }
-      const body = await readBody<EnrollmentRequest>(request);
-      if (!body.machineId || !body.secretName) {
-        return json({ ok: false, error: 'machineId and secretName are required' }, 400, origin);
-      }
-      const ttlSeconds = Math.min(Math.max(body.ttlSeconds || 600, 60), 3600);
-      const issuedAt = nowSeconds();
-      const exp = issuedAt + ttlSeconds;
-      const jti = randomId();
-      const payload: SignedTokenPayload = {
-        typ: 'enrollment',
-        jti,
-        machineId: body.machineId,
-        secretName: body.secretName,
-        iat: issuedAt,
-        exp,
-      };
-      const record: EnrollmentRecord = {
-        machineId: body.machineId,
-        secretName: body.secretName,
-        issuedAt: isoFromSeconds(issuedAt),
-        expiresAt: isoFromSeconds(exp),
-        metadata: body.metadata,
-      };
-      await env.PI_SETUP_SECRETS.put(`enrollment:${jti}`, JSON.stringify(record), { expiration: exp });
-      return json({ ok: true, token: await signToken(payload, env.PI_SETUP_ENROLLMENT_SIGNING_KEY), expiresAt: record.expiresAt, machineId: body.machineId, secretName: body.secretName }, 200, origin);
+    if (request.method === 'OPTIONS') {
+      return response(ctx, { ok: true, requestId: ctx.requestId }, 200);
     }
 
-    if (request.method === 'POST' && url.pathname === '/v1/machines/enroll') {
-      const token = bearerToken(auth);
-      if (!token) return json({ ok: false, error: 'unauthorized' }, 401, origin);
-      const payload = await verifyToken(token, env.PI_SETUP_ENROLLMENT_SIGNING_KEY);
-      if (!payload || payload.typ !== 'enrollment') {
-        return json({ ok: false, error: 'invalid enrollment token' }, 401, origin);
-      }
-      if (payload.exp < nowSeconds()) {
-        return json({ ok: false, error: 'enrollment token expired' }, 401, origin);
-      }
-      const recordKey = `enrollment:${payload.jti}`;
-      const stored = await env.PI_SETUP_SECRETS.get(recordKey, 'json') as EnrollmentRecord | null;
-      if (!stored) return json({ ok: false, error: 'enrollment token not found or expired' }, 404, origin);
-      if (stored.enrolledAt) return json({ ok: false, error: 'enrollment token already used' }, 409, origin);
+    log('info', 'request.start', ctx);
 
-      const bootstrapIssuedAt = nowSeconds();
-      const bootstrapExp = bootstrapIssuedAt + 300;
-      const bootstrapPayload: SignedTokenPayload = {
-        typ: 'bootstrap',
-        jti: randomId(),
-        machineId: payload.machineId,
-        secretName: payload.secretName,
-        iat: bootstrapIssuedAt,
-        exp: bootstrapExp,
-      };
-      const enrollmentMetadata = await readBody<Record<string, unknown>>(request).catch(() => ({}));
-      await env.PI_SETUP_SECRETS.put(recordKey, JSON.stringify({
-        ...stored,
-        enrolledAt: new Date().toISOString(),
-        bootstrapIssuedAt: isoFromSeconds(bootstrapIssuedAt),
-        metadata: { ...(stored.metadata || {}), ...(enrollmentMetadata || {}) },
-      }), { expiration: payload.exp });
-      await env.PI_SETUP_SECRETS.put(`machine:${payload.machineId}`, JSON.stringify({
-        machineId: payload.machineId,
-        secretName: payload.secretName,
-        enrolledAt: new Date().toISOString(),
-        metadata: enrollmentMetadata || {},
-      }));
-      return json({ ok: true, machineId: payload.machineId, secretName: payload.secretName, bootstrapToken: await signToken(bootstrapPayload, env.PI_SETUP_ENROLLMENT_SIGNING_KEY), bootstrapExpiresAt: isoFromSeconds(bootstrapExp) }, 200, origin);
-    }
+    try {
+      const auth = request.headers.get('authorization');
 
-    if (request.method === 'POST' && url.pathname === '/v1/secrets/upsert') {
-      if (!isAdminAuth(auth, env)) {
-        return json({ ok: false, error: 'unauthorized' }, 401, origin);
-      }
-      const body = await readBody<SecretRecord>(request);
-      if (!body.name || !body.ciphertext || !body.iv || !body.tag) {
-        return json({ ok: false, error: 'name, ciphertext, iv, and tag are required' }, 400, origin);
-      }
-      const record: SecretRecord = {
-        ...body,
-        algorithm: body.algorithm || 'AES-GCM',
-        version: body.version || '1',
-        updatedAt: new Date().toISOString(),
-      };
-      await env.PI_SETUP_SECRETS.put(`secret:${record.name}`, JSON.stringify(record));
-      return json({ ok: true, stored: record.name, updatedAt: record.updatedAt }, 200, origin);
-    }
+      if (request.method === 'POST' && url.pathname === '/v1/enrollment-tokens/issue') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
 
-    if (request.method === 'POST' && url.pathname === '/v1/fleet/heartbeat') {
-      if (!isAdminAuth(auth, env)) {
-        return json({ ok: false, error: 'unauthorized' }, 401, origin);
-      }
-      const body = await readBody<FleetHeartbeat>(request);
-      if (!body.machineId || !body.hostname || !body.timestamp) {
-        return json({ ok: false, error: 'machineId, hostname, and timestamp are required' }, 400, origin);
-      }
-      const heartbeat: FleetHeartbeat = {
-        ...body,
-        receivedAt: new Date().toISOString(),
-        stale: isStaleHeartbeat(body.timestamp),
-      };
-      await env.PI_SETUP_SECRETS.put(`fleet:${heartbeat.machineId}`, JSON.stringify(heartbeat));
-      return json({ ok: true, machineId: heartbeat.machineId, receivedAt: heartbeat.receivedAt }, 200, origin);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/v1/fleet/heartbeats') {
-      if (!isAdminAuth(auth, env)) {
-        return json({ ok: false, error: 'unauthorized' }, 401, origin);
-      }
-      const list = await env.PI_SETUP_SECRETS.list({ prefix: 'fleet:' });
-      const heartbeats = await Promise.all(list.keys.map(async (key) => {
-        const value = await env.PI_SETUP_SECRETS.get(key.name, 'json') as FleetHeartbeat | null;
-        if (!value) return null;
-        return {
-          ...value,
-          stale: isStaleHeartbeat(value.timestamp),
+        const body = await readBody<EnrollmentRequest>(request);
+        if (!body.machineId || !body.secretName) {
+          return response(ctx, { ok: false, error: 'machineId and secretName are required', requestId: ctx.requestId }, 400);
+        }
+        const ttlSeconds = Math.min(Math.max(body.ttlSeconds || 600, 60), 3600);
+        const issuedAt = nowSeconds();
+        const exp = issuedAt + ttlSeconds;
+        const jti = randomId();
+        const payload: SignedTokenPayload = {
+          typ: 'enrollment',
+          jti,
+          machineId: body.machineId,
+          secretName: body.secretName,
+          iat: issuedAt,
+          exp,
         };
-      }));
-      const items = heartbeats.filter((value): value is FleetHeartbeat => Boolean(value)).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-      return json({ ok: true, count: items.length, heartbeats: items }, 200, origin);
-    }
-
-    if (request.method === 'GET' && url.pathname.startsWith('/v1/secrets/')) {
-      const name = decodeURIComponent(url.pathname.replace('/v1/secrets/', ''));
-      const authz = await authorizeSecretRead(request, env, name);
-      if (!authz.ok) return authz.response;
-      const data = await env.PI_SETUP_SECRETS.get(`secret:${name}`);
-      if (!data) return json({ ok: false, error: 'not found' }, 404, origin);
-      return json({ ok: true, machineId: authz.machineId, secret: JSON.parse(data) }, 200, origin);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/v1/secrets') {
-      if (!isAdminAuth(auth, env)) {
-        return json({ ok: false, error: 'unauthorized' }, 401, origin);
+        const record: EnrollmentRecord = {
+          machineId: body.machineId,
+          secretName: body.secretName,
+          issuedAt: isoFromSeconds(issuedAt),
+          expiresAt: isoFromSeconds(exp),
+          metadata: body.metadata,
+        };
+        await env.PI_SETUP_SECRETS.put(`enrollment:${jti}`, JSON.stringify(record), { expiration: exp });
+        log('info', 'enrollment.token.issued', ctx, { machineId: body.machineId, secretName: body.secretName, ttlSeconds });
+        return response(ctx, { ok: true, token: await signToken(payload, env.PI_SETUP_ENROLLMENT_SIGNING_KEY), expiresAt: record.expiresAt, machineId: body.machineId, secretName: body.secretName, requestId: ctx.requestId }, 200);
       }
-      const list = await env.PI_SETUP_SECRETS.list({ prefix: 'secret:' });
-      return json({ ok: true, keys: list.keys.map((key) => key.name.replace(/^secret:/, '')) }, 200, origin);
-    }
 
-    return json({ ok: false, error: 'not found' }, 404, origin);
+      if (request.method === 'POST' && url.pathname === '/v1/machines/enroll') {
+        const token = bearerToken(auth);
+        if (!token) return unauthorized(ctx);
+        const payload = await verifyToken(token, env.PI_SETUP_ENROLLMENT_SIGNING_KEY);
+        if (!payload || payload.typ !== 'enrollment') {
+          return response(ctx, { ok: false, error: 'invalid enrollment token', requestId: ctx.requestId }, 401);
+        }
+        if (payload.exp < nowSeconds()) {
+          return response(ctx, { ok: false, error: 'enrollment token expired', requestId: ctx.requestId }, 401);
+        }
+        const recordKey = `enrollment:${payload.jti}`;
+        const stored = await env.PI_SETUP_SECRETS.get(recordKey, 'json') as EnrollmentRecord | null;
+        if (!stored) return response(ctx, { ok: false, error: 'enrollment token not found or expired', requestId: ctx.requestId }, 404);
+        if (stored.enrolledAt) return response(ctx, { ok: false, error: 'enrollment token already used', requestId: ctx.requestId }, 409);
+
+        const bootstrapIssuedAt = nowSeconds();
+        const bootstrapExp = bootstrapIssuedAt + 300;
+        const bootstrapPayload: SignedTokenPayload = {
+          typ: 'bootstrap',
+          jti: randomId(),
+          machineId: payload.machineId,
+          secretName: payload.secretName,
+          iat: bootstrapIssuedAt,
+          exp: bootstrapExp,
+        };
+        const enrollmentMetadata = await readBody<Record<string, unknown>>(request).catch(() => ({}));
+        await env.PI_SETUP_SECRETS.put(recordKey, JSON.stringify({
+          ...stored,
+          enrolledAt: new Date().toISOString(),
+          bootstrapIssuedAt: isoFromSeconds(bootstrapIssuedAt),
+          metadata: { ...(stored.metadata || {}), ...(enrollmentMetadata || {}) },
+        }), { expiration: payload.exp });
+        await env.PI_SETUP_SECRETS.put(`machine:${payload.machineId}`, JSON.stringify({
+          machineId: payload.machineId,
+          secretName: payload.secretName,
+          enrolledAt: new Date().toISOString(),
+          metadata: enrollmentMetadata || {},
+        }));
+        log('info', 'machine.enrolled', ctx, { machineId: payload.machineId, secretName: payload.secretName });
+        return response(ctx, { ok: true, machineId: payload.machineId, secretName: payload.secretName, bootstrapToken: await signToken(bootstrapPayload, env.PI_SETUP_ENROLLMENT_SIGNING_KEY), bootstrapExpiresAt: isoFromSeconds(bootstrapExp), requestId: ctx.requestId }, 200);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/v1/secrets/upsert') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const body = await readBody<SecretRecord>(request);
+        if (!body.name || !body.ciphertext || !body.iv || !body.tag) {
+          return response(ctx, { ok: false, error: 'name, ciphertext, iv, and tag are required', requestId: ctx.requestId }, 400);
+        }
+        const record: SecretRecord = {
+          ...body,
+          algorithm: body.algorithm || 'AES-GCM',
+          version: body.version || '1',
+          updatedAt: new Date().toISOString(),
+        };
+        await env.PI_SETUP_SECRETS.put(`secret:${record.name}`, JSON.stringify(record));
+        log('info', 'secret.upserted', ctx, { secretName: record.name, machineId: record.machineId ?? null });
+        return response(ctx, { ok: true, stored: record.name, updatedAt: record.updatedAt, requestId: ctx.requestId }, 200);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/v1/fleet/heartbeat') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const body = await readBody<FleetHeartbeat>(request);
+        if (!body.machineId || !body.hostname || !body.timestamp) {
+          return response(ctx, { ok: false, error: 'machineId, hostname, and timestamp are required', requestId: ctx.requestId }, 400);
+        }
+        const heartbeat: FleetHeartbeat = {
+          ...body,
+          receivedAt: new Date().toISOString(),
+          stale: isStaleHeartbeat(body.timestamp),
+        };
+        await env.PI_SETUP_SECRETS.put(`fleet:${heartbeat.machineId}`, JSON.stringify(heartbeat));
+        log('info', 'fleet.heartbeat.received', ctx, { machineId: heartbeat.machineId, hostname: heartbeat.hostname, stale: heartbeat.stale });
+        return response(ctx, { ok: true, machineId: heartbeat.machineId, receivedAt: heartbeat.receivedAt, requestId: ctx.requestId }, 200);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/v1/fleet/heartbeats') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const heartbeats = await listJsonByPrefix<FleetHeartbeat>(env, 'fleet:');
+        const items = heartbeats.map((value) => ({ ...value, stale: isStaleHeartbeat(value.timestamp) }))
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        return response(ctx, { ok: true, count: items.length, heartbeats: items, requestId: ctx.requestId }, 200);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/v1/observability/websocket-events') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const body = await readBody<WebsocketTraceEvent>(request);
+        if (!body.machineId || !body.eventType || !body.direction) {
+          return response(ctx, { ok: false, error: 'machineId, eventType, and direction are required', requestId: ctx.requestId }, 400);
+        }
+        const event: WebsocketTraceEvent = {
+          ...body,
+          timestamp: body.timestamp || new Date().toISOString(),
+          requestId: ctx.requestId,
+        };
+        await env.PI_SETUP_SECRETS.put(traceKey(event.timestamp), JSON.stringify(event));
+        log('info', 'websocket.event.recorded', ctx, {
+          machineId: event.machineId,
+          connectionId: event.connectionId ?? null,
+          direction: event.direction,
+          eventType: event.eventType,
+          status: event.status ?? null,
+          payloadSize: event.payloadSize ?? null,
+        });
+        return response(ctx, { ok: true, recordedAt: event.timestamp, requestId: ctx.requestId }, 200);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/v1/observability/websocket-events') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const machineId = url.searchParams.get('machineId');
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || '25'), 1), MAX_TRACE_LIST_LIMIT);
+        const events = await listJsonByPrefix<WebsocketTraceEvent>(env, 'ws-event:', limit);
+        const filtered = events
+          .filter((event) => !machineId || event.machineId === machineId)
+          .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))
+          .slice(0, limit);
+        return response(ctx, { ok: true, count: filtered.length, events: filtered, requestId: ctx.requestId }, 200);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/v1/diagnostics') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const [secretsList, enrollmentsList, machinesList, fleetList, websocketList] = await Promise.all([
+          env.PI_SETUP_SECRETS.list({ prefix: 'secret:' }),
+          env.PI_SETUP_SECRETS.list({ prefix: 'enrollment:' }),
+          env.PI_SETUP_SECRETS.list({ prefix: 'machine:' }),
+          env.PI_SETUP_SECRETS.list({ prefix: 'fleet:' }),
+          env.PI_SETUP_SECRETS.list({ prefix: 'ws-event:', limit: MAX_TRACE_LIST_LIMIT }),
+        ]);
+
+        const latestHeartbeats = (await listJsonByPrefix<FleetHeartbeat>(env, 'fleet:', 10))
+          .map((value) => ({ ...value, stale: isStaleHeartbeat(value.timestamp) }))
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        const latestWebsocketEvents = (await listJsonByPrefix<WebsocketTraceEvent>(env, 'ws-event:', 20))
+          .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+        return response(ctx, {
+          ok: true,
+          requestId: ctx.requestId,
+          diagnostics: {
+            counts: {
+              secrets: secretsList.keys.length,
+              enrollments: enrollmentsList.keys.length,
+              machines: machinesList.keys.length,
+              fleetHeartbeats: fleetList.keys.length,
+              websocketEvents: websocketList.keys.length,
+            },
+            auth: {
+              allowedOrigin: origin,
+              bootstrapTokenConfigured: Boolean(env.PI_SETUP_BOOTSTRAP_TOKEN),
+              enrollmentSigningKeyConfigured: Boolean(env.PI_SETUP_ENROLLMENT_SIGNING_KEY),
+            },
+            fleet: {
+              staleCount: latestHeartbeats.filter((item) => item.stale).length,
+              latestHeartbeats,
+            },
+            websocket: {
+              latestEvents: latestWebsocketEvents,
+            },
+          },
+        }, 200);
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/v1/secrets/')) {
+        const name = decodeURIComponent(url.pathname.replace('/v1/secrets/', ''));
+        const authz = await authorizeSecretRead(request, env, name, ctx);
+        if (!authz.ok) return authz.response;
+        const data = await env.PI_SETUP_SECRETS.get(`secret:${name}`);
+        if (!data) return response(ctx, { ok: false, error: 'not found', requestId: ctx.requestId }, 404);
+        log('info', 'secret.read', ctx, { secretName: name, machineId: authz.machineId });
+        return response(ctx, { ok: true, machineId: authz.machineId, secret: JSON.parse(data), requestId: ctx.requestId }, 200);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/v1/secrets') {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const list = await env.PI_SETUP_SECRETS.list({ prefix: 'secret:' });
+        return response(ctx, { ok: true, keys: list.keys.map((key) => key.name.replace(/^secret:/, '')), requestId: ctx.requestId }, 200);
+      }
+
+      return response(ctx, { ok: false, error: 'not found', requestId: ctx.requestId }, 404);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log('error', 'request.failed', ctx, { error: message });
+      return response(ctx, { ok: false, error: 'internal error', requestId: ctx.requestId }, 500);
+    }
   }
 };

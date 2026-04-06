@@ -4,21 +4,25 @@
   <meta charset="utf-8" />
   <title>pi-setup fleet dashboard</title>
   <style>
-    body{font-family:system-ui;max-width:1100px;margin:40px auto;padding:0 16px}
+    body{font-family:system-ui;max-width:1200px;margin:40px auto;padding:0 16px}
     pre{background:#111;color:#0f0;padding:16px;overflow:auto;border-radius:8px}
     .controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
     .controls label{display:flex;flex-direction:column;font-size:14px;gap:6px}
     .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:16px 0}
     .card{border:1px solid #ddd;border-radius:10px;padding:12px;background:#fafafa}
     .stale{border-color:#c77;background:#fff3f3}
+    .grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start}
+    .panel{border:1px solid #ddd;border-radius:10px;padding:12px;background:#fafafa;margin:16px 0}
+    .meta{font-size:12px;color:#555}
     code,input,select,button{font:inherit}
     input,select{padding:8px}
     button{padding:8px 12px}
+    ul{margin:8px 0 0 18px}
   </style>
 </head>
 <body>
   <h1>pi-setup fleet dashboard</h1>
-  <p>Inspect either the local daemon or centralized Worker heartbeats.</p>
+  <p>Inspect the local daemon, centralized Worker heartbeats, websocket traces, and diagnostics.</p>
 
   <div class="controls">
     <label>
@@ -30,11 +34,11 @@
     </label>
     <label>
       Worker URL
-      <input id="workerUrl" placeholder="https://<worker-url>" />
+      <input id="workerUrl" placeholder="https://&lt;worker-url&gt;" />
     </label>
     <label>
       Dashboard token
-      <input id="token" type="password" placeholder="Bearer token for /v1/fleet/heartbeats" />
+      <input id="token" type="password" placeholder="Bearer token for worker endpoints" />
     </label>
     <label>
       Local daemon URL
@@ -42,9 +46,22 @@
     </label>
   </div>
 
-  <button onclick="load()">Refresh</button>
-  <div id="cards" class="cards"></div>
-  <pre id="out">Loading…</pre>
+  <button onclick="loadAll()">Refresh</button>
+  <div class="grid">
+    <div>
+      <div id="cards" class="cards"></div>
+      <div class="panel">
+        <h2>Diagnostics</h2>
+        <div id="diagnostics">Loading…</div>
+      </div>
+      <div class="panel">
+        <h2>Websocket traces</h2>
+        <div id="ws">Loading…</div>
+      </div>
+    </div>
+    <pre id="out">Loading…</pre>
+  </div>
+
   <script>
     function esc(value) {
       return String(value ?? '').replace(/[&<>\"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
@@ -69,7 +86,69 @@
       `).join('');
     }
 
-    async function load(){
+    function renderDiagnostics(data, mode) {
+      const el = document.getElementById('diagnostics');
+      if (!data) {
+        el.innerHTML = '<em>No diagnostics available.</em>';
+        return;
+      }
+
+      if (mode === 'remote') {
+        const diag = data.diagnostics || {};
+        const counts = diag.counts || {};
+        const fleet = diag.fleet || {};
+        el.innerHTML = `
+          <div class="meta">requestId: <code>${esc(data.requestId)}</code></div>
+          <ul>
+            <li>secrets: <strong>${esc(counts.secrets)}</strong></li>
+            <li>enrollments: <strong>${esc(counts.enrollments)}</strong></li>
+            <li>machines: <strong>${esc(counts.machines)}</strong></li>
+            <li>fleet heartbeats: <strong>${esc(counts.fleetHeartbeats)}</strong></li>
+            <li>websocket events: <strong>${esc(counts.websocketEvents)}</strong></li>
+            <li>stale machines: <strong>${esc(fleet.staleCount)}</strong></li>
+          </ul>
+        `;
+        return;
+      }
+
+      const diag = data.diagnostics || {};
+      el.innerHTML = `
+        <div class="meta">requestId: <code>${esc(data.requestId)}</code></div>
+        <ul>
+          <li>machineId: <strong>${esc(diag.machineId)}</strong></li>
+          <li>daemon port: <strong>${esc(diag.daemonPort)}</strong></li>
+          <li>heartbeat interval ms: <strong>${esc(diag.heartbeatIntervalMs)}</strong></li>
+          <li>worker configured: <strong>${esc(diag.workerConfigured)}</strong></li>
+          <li>commands queued: <strong>${esc(diag.commandsQueued)}</strong></li>
+          <li>state file: <code>${esc(diag.latestStatePath)}</code></li>
+        </ul>
+      `;
+    }
+
+    function renderWs(data, mode) {
+      const el = document.getElementById('ws');
+      const events = mode === 'remote'
+        ? (data?.events || data?.diagnostics?.websocket?.latestEvents || [])
+        : [];
+      if (!events.length) {
+        el.innerHTML = '<em>No websocket traces recorded.</em>';
+        return;
+      }
+      el.innerHTML = `<ul>${events.map((event) => `
+        <li>
+          <strong>${esc(event.eventType)}</strong>
+          <span class="meta">${esc(event.timestamp)} · ${esc(event.machineId)} · ${esc(event.direction)}${event.status ? ` · ${esc(event.status)}` : ''}</span>
+        </li>
+      `).join('')}</ul>`;
+    }
+
+    async function loadJson(url, headers) {
+      const res = await fetch(url, { headers });
+      const data = await res.json();
+      return { res, data };
+    }
+
+    async function loadAll(){
       const mode = document.getElementById('mode').value;
       const daemonUrl = document.getElementById('daemonUrl').value.replace(/\/$/, '');
       const workerUrl = document.getElementById('workerUrl').value.replace(/\/$/, '');
@@ -77,20 +156,37 @@
       const out = document.getElementById('out');
       out.textContent = 'Loading…';
 
-      const endpoint = mode === 'remote' ? `${workerUrl}/v1/fleet/heartbeats` : `${daemonUrl}/metrics`;
-      const headers = mode === 'remote' && token ? { authorization: `Bearer ${token}` } : {};
-      const res = await fetch(endpoint, { headers });
-      const data = await res.json();
-      if (!res.ok) {
+      const headers = token ? { authorization: `Bearer ${token}` } : {};
+      try {
+        if (mode === 'remote') {
+          const [heartbeats, diagnostics, ws] = await Promise.all([
+            loadJson(`${workerUrl}/v1/fleet/heartbeats`, headers),
+            loadJson(`${workerUrl}/v1/diagnostics`, headers),
+            loadJson(`${workerUrl}/v1/observability/websocket-events?limit=20`, headers),
+          ]);
+          renderCards(heartbeats.data.heartbeats || []);
+          renderDiagnostics(diagnostics.data, mode);
+          renderWs(ws.data, mode);
+          out.textContent = JSON.stringify({ heartbeats: heartbeats.data, diagnostics: diagnostics.data, websocketEvents: ws.data }, null, 2);
+          return;
+        }
+
+        const [metrics, diagnostics] = await Promise.all([
+          loadJson(`${daemonUrl}/metrics`, headers),
+          loadJson(`${daemonUrl}/diagnostics`, headers),
+        ]);
+        renderCards([metrics.data]);
+        renderDiagnostics(diagnostics.data, mode);
+        renderWs(null, mode);
+        out.textContent = JSON.stringify({ metrics: metrics.data, diagnostics: diagnostics.data }, null, 2);
+      } catch (error) {
         renderCards([]);
-        out.textContent = JSON.stringify(data, null, 2);
-        return;
+        renderDiagnostics(null, mode);
+        renderWs(null, mode);
+        out.textContent = JSON.stringify({ ok: false, error: String(error) }, null, 2);
       }
-      const items = mode === 'remote' ? (data.heartbeats || []) : [data];
-      renderCards(items);
-      out.textContent = JSON.stringify(data, null, 2);
     }
-    load();
+    loadAll();
   </script>
 </body>
 </html>

@@ -14,8 +14,12 @@ if (!workerUrl || !bootstrapToken || !secretName || !passphrase) {
   process.exit(1);
 }
 
+const requestId = crypto.randomUUID();
 const res = await fetch(`${workerUrl.replace(/\/$/, '')}/v1/secrets/${encodeURIComponent(secretName)}`, {
-  headers: { authorization: `Bearer ${bootstrapToken}` }
+  headers: {
+    authorization: `Bearer ${bootstrapToken}`,
+    'x-request-id': requestId,
+  }
 });
 if (!res.ok) {
   console.error(await res.text());
