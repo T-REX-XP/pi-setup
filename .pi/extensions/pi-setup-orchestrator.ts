@@ -235,12 +235,60 @@ export default function (pi: ExtensionAPI) {
     return agents;
   }
 
-  async function loadPendingWorkflow(): Promise<void> {
+  function normalizeWorkflowObjective(value: string): string {
+    return value.toLowerCase().replace(/[`'".]+/g, "").replace(/\s+/g, " ").trim();
+  }
+
+  async function isWorkflowCompletedInBacklog(workflow: WorkflowState): Promise<boolean> {
+    const backlog = await readFileIfExists(path.join(knowledgeDir, "backlog.md"));
+    if (!backlog.trim()) return false;
+    const objective = normalizeWorkflowObjective(workflow.objective);
+    return backlog
+      .split(/\r?\n/)
+      .map((line) => line.match(/^\s*-\s*\[(x|X)\]\s+(.+)$/)?.[2] ?? "")
+      .filter(Boolean)
+      .some((item) => normalizeWorkflowObjective(item) === objective);
+  }
+
+  async function loadPendingWorkflow(): Promise<"active" | "cleared-completed" | "none"> {
     try {
       pendingWorkflow = JSON.parse(await fs.readFile(workflowStateFile, "utf8"));
     } catch {
       pendingWorkflow = null;
+      return "none";
     }
+
+    if (!pendingWorkflow) return "none";
+
+    if (pendingWorkflow.currentIndex >= pendingWorkflow.phases.length) {
+      const cleared = pendingWorkflow;
+      pendingWorkflow = null;
+      await savePendingWorkflow();
+      await appendHistory({
+        type: "workflow-auto-cleared",
+        workflowId: cleared.id,
+        workflow: cleared.kind,
+        objective: cleared.objective,
+        reason: "phase-index-complete",
+      });
+      return "none";
+    }
+
+    if (await isWorkflowCompletedInBacklog(pendingWorkflow)) {
+      const cleared = pendingWorkflow;
+      pendingWorkflow = null;
+      await savePendingWorkflow();
+      await appendHistory({
+        type: "workflow-auto-cleared",
+        workflowId: cleared.id,
+        workflow: cleared.kind,
+        objective: cleared.objective,
+        reason: "completed-in-backlog",
+      });
+      return "cleared-completed";
+    }
+
+    return "active";
   }
 
   async function savePendingWorkflow(): Promise<void> {
@@ -485,6 +533,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function startWorkflow(kind: "feature" | "task" | "quick", objective: string): Promise<void> {
+    await loadPendingWorkflow();
     if (pendingWorkflow) throw new Error(`A workflow is already pending: ${pendingWorkflow.kind} -> ${pendingWorkflow.objective}`);
     const workflow: WorkflowState = {
       id: `${kind}-${Date.now()}`,
@@ -614,9 +663,12 @@ export default function (pi: ExtensionAPI) {
     }, { triggerTurn: false });
   }
 
-  pi.on("session_start", async () => {
+  pi.on("session_start", async (_event, ctx) => {
     await ensureStateDir();
-    await loadPendingWorkflow();
+    const status = await loadPendingWorkflow();
+    if (status === "cleared-completed") {
+      ctx.ui.notify("Cleared stale pending workflow because the objective is already marked complete in the backlog.", "info");
+    }
   });
 
   pi.on("before_agent_start", async () => {
@@ -659,7 +711,10 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("continue", {
     description: "Continue the next phase of the pending workflow",
     handler: async (_args, ctx) => {
-      await loadPendingWorkflow();
+      const status = await loadPendingWorkflow();
+      if (status === "cleared-completed") {
+        ctx.ui.notify("Cleared stale pending workflow because the objective is already marked complete in the backlog.", "info");
+      }
       if (!pendingWorkflow) {
         ctx.ui.notify("No pending workflow.", "warning");
         return;

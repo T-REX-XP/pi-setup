@@ -9,6 +9,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [x] Add signed machine enrollment with short-lived bootstrap tokens issued from the Worker.
 - [x] Push daemon heartbeats to the Worker for centralized fleet dashboards.
 - [x] Add richer review deduplication using semantic clustering.
+- [x] Auto-clear stale completed pending workflows in the pi.dev orchestrator.
 - [x] Align `nas-ui` project documentation with the current Go + Svelte architecture.
 - [x] Create `nas-ui` architecture and API reference docs for HTTP and WebSocket surfaces.
 - [x] Refactor `nas-ui` backend startup/orchestration out of `src/backend/cmd/nas-ui/main.go`.
