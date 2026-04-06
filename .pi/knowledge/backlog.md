@@ -43,7 +43,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 ### Phase 3 — Product UX
 - [x] Add file icons: text/img/video/pdf/etc.... to the file gallery in the frontend app
 - [x] Implement preview/thumbnails for the images, follow best practices of the thumbnail generation. 
-- [ ] Add mobile-friendly onboarding for first boot, network setup, storage initialization, and service enablement. it must be a feature with turn on/off logic via the config.
+- [x] Add mobile-friendly onboarding for first boot, network setup, storage initialization, and service enablement. it must be a feature with turn on/off logic via the config.
 - [ ] Add notifications/alerting for disk pressure, offline nodes, hotspot state changes, failed jobs, and update availability.
 - [ ] Add job history and activity timeline for copy operations, network changes, updates, and administrative actions.
 - [ ] Add user-visible storage health reporting: SMART status, temperature, filesystem usage trends, and disk failure warnings.
