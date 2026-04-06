@@ -22,3 +22,24 @@
 - Starting ordinary turns in the project should no longer require an `openrouter` login when GitHub Copilot is available.
 - Workflow commands should operate against the repo-local defaults and explicit agent models.
 - If a workflow is truly pending, `/workflow-status` and `/workflow-clear` remain the recovery path.
+
+## 2026-04-06 — Cleared/completed workflows could still block new `/feature` runs if stale state file remained
+
+### Symptoms
+- Starting a new workflow could fail with:
+  - `Extension "command:feature" error: A workflow is already pending: ...`
+- This could still happen even after the prior workflow had been cleared or completed in history.
+
+### Root cause
+1. The orchestrator treated `.pi/state/pending-workflow.json` as the sole source of truth for active workflow state.
+2. If that file remained behind after a clear/complete event, the next `/feature` run still saw the old workflow as pending.
+3. Completion emitted a UI event but did not append a durable `workflow-complete` history record.
+
+### Fix
+- Teach the orchestrator to auto-ignore and remove stale pending state when the same workflow was already marked `workflow-cleared`, `workflow-auto-cleared`, or `workflow-complete` in history.
+- Append a durable `workflow-complete` history entry when the final phase finishes.
+
+### Validation
+- A cleared workflow in history no longer blocks a new `/feature` command even if `pending-workflow.json` lingers.
+- A completed workflow now leaves an explicit `workflow-complete` entry in `.pi/state/workflow-history.jsonl`.
+- New workflow starts only fail when an actually active pending workflow exists.

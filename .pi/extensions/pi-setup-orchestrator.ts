@@ -250,6 +250,24 @@ export default function (pi: ExtensionAPI) {
       .some((item) => normalizeWorkflowObjective(item) === objective);
   }
 
+  async function workflowAlreadyClearedInHistory(workflow: WorkflowState): Promise<boolean> {
+    const history = await readFileIfExists(historyFile);
+    if (!history.trim()) return false;
+
+    return history
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .some((line) => {
+        try {
+          const entry = JSON.parse(line) as { type?: string; workflowId?: string };
+          return entry.workflowId === workflow.id && ["workflow-cleared", "workflow-auto-cleared", "workflow-complete"].includes(entry.type || "");
+        } catch {
+          return false;
+        }
+      });
+  }
+
   async function loadPendingWorkflow(): Promise<"active" | "cleared-completed" | "none"> {
     try {
       pendingWorkflow = JSON.parse(await fs.readFile(workflowStateFile, "utf8"));
@@ -259,6 +277,12 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (!pendingWorkflow) return "none";
+
+    if (await workflowAlreadyClearedInHistory(pendingWorkflow)) {
+      pendingWorkflow = null;
+      await savePendingWorkflow();
+      return "none";
+    }
 
     if (pendingWorkflow.currentIndex >= pendingWorkflow.phases.length) {
       const cleared = pendingWorkflow;
@@ -525,6 +549,12 @@ export default function (pi: ExtensionAPI) {
     await appendHistory({ type: "workflow-phase", workflowId: workflow.id, workflow: workflow.kind, objective: workflow.objective, result });
     await emitPhaseResult(result, pendingWorkflow ? "Reply with /continue to run the next phase." : "Workflow complete.");
     if (!pendingWorkflow) {
+      await appendHistory({
+        type: "workflow-complete",
+        workflowId: workflow.id,
+        workflow: workflow.kind,
+        objective: workflow.objective,
+      });
       pi.sendMessage({
         customType: "workflow-complete",
         display: true,
