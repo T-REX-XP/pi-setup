@@ -347,9 +347,10 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function spawnPi(agent: AgentConfig, prompt: string, cwd: string = repoRoot): Promise<string> {
-    const args = ["-p", "--no-session", "--system-prompt", agent.systemPrompt, prompt];
-    if (agent.model) args.unshift(agent.model, "--model");
-    if (agent.tools?.length) args.unshift(agent.tools.join(","), "--tools");
+    const args: string[] = [];
+    if (agent.model) args.push("--model", agent.model);
+    if (agent.tools?.length) args.push("--tools", agent.tools.join(","));
+    args.push("-p", "--no-session", "--system-prompt", agent.systemPrompt, prompt);
 
     return await new Promise<string>((resolve, reject) => {
       const child = spawn("pi", args, {

@@ -1,0 +1,4 @@
+Summary: Agent frontmatter must use exact available provider/model IDs or subagent workflows fail at spawn time.
+Detail: The workflow agents were configured with `anthropic/claude-opus` and `openai/gpt-5.4`, but the available configured models in this environment are exposed under providers such as `github-copilot/*` and `openai-codex/*`. A direct `pi --model anthropic/claude-opus -p --no-session hi` check failed with `No API key found for anthropic`, while `github-copilot/claude-opus-4.6` and `openai-codex/gpt-5.4` succeeded. This makes exact provider/model validation an operational prerequisite for agent configs.
+Action: When adding or changing agent models, first run `pi --list-models` and validate the chosen exact IDs with a one-shot `pi --model <provider/model> -p --no-session hi` smoke test.
+Tag: tool-recommendation

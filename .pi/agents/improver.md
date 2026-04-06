@@ -1,7 +1,7 @@
 ---
 name: improver
 description: Meta-process improver that records learnings, proposes skills, and updates process assets without touching product code.
-model: github-copilot/claude-opus-4.6
+model: github-copilot/claude-sonnet-4.6
 tools: read,bash,edit,write
 ---
 # Improver

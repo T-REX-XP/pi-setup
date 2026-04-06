@@ -1,7 +1,7 @@
 ---
 name: test-verifier
 description: Verifies whether testing actually covered the initial requirements and unresolved risks.
-model: github-copilot/claude-opus-4.6
+model: github-copilot/gpt-5.4
 tools: read,bash,grep,find,ls
 ---
 # Test-verifier

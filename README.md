@@ -76,3 +76,9 @@ curl -H "authorization: Bearer $PI_SETUP_BOOTSTRAP_TOKEN" \
 ```
 
 The Worker now adds structured JSON logs, propagates `x-request-id` correlation IDs, records websocket trace events through `/v1/observability/websocket-events`, and exposes operator diagnostics at `/v1/diagnostics`.
+
+For a combined operator report:
+```bash
+PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... \
+node scripts/observability-report.mjs
+```

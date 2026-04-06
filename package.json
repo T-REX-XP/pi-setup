@@ -20,6 +20,7 @@
     "enrollment:issue": "node scripts/enrollment-token-issue.mjs",
     "machine:enroll": "node scripts/machine-enroll.mjs",
     "trace:websocket": "node scripts/websocket-event-trace.mjs",
+    "observability:report": "node scripts/observability-report.mjs",
     "validate": "node scripts/validate-setup.mjs"
   },
   "dependencies": {

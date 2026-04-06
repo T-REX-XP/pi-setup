@@ -11,6 +11,7 @@ const required = [
   'cloudflare/worker/src/index.ts',
   'scripts/enrollment-token-issue.mjs',
   'scripts/machine-enroll.mjs',
+  'scripts/observability-report.mjs',
   'install.sh'
 ];
 
