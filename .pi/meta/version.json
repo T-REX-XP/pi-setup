@@ -1,5 +1,5 @@
 {
-  "version": "0.1.36",
-  "lastBump": "2026-04-06T13:15:44.940Z",
+  "version": "0.1.37",
+  "lastBump": "2026-04-06T13:26:59.830Z",
   "strategy": "patch-per-commit"
 }

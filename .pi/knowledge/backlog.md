@@ -38,7 +38,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [x] Add stronger security defaults: tighter CSRF/session controls, safer local token handling, audit logging, and permission boundaries.
 - [x] Add role-based auth/session hardening for local admin, remote admin, and read-only viewers.
 - [x] Add authenticated file browsing, upload, download, rename, move, and delete flows in `nas-ui`.
-- [ ] Improve observability with structured logs, request correlation, websocket event tracing, and operator-facing diagnostics.
+- [x] Improve observability with structured logs, request correlation, websocket event tracing, and operator-facing diagnostics.
 
 ### Phase 3 — Product UX
 - [x] Add file icons: text/img/video/pdf/etc.... to the file gallery in the frontend app
@@ -63,3 +63,4 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [ ] Remove or rewrite compatibility barrels once all consumers are migrated to the feature-specific store modules.
 - [ ] Introduce linting/formatting/typecheck enforcement where missing, and make local/CI output consistent.
 - [ ] Review embedded frontend build artifacts and generated files to ensure repository hygiene and avoid accidental source-of-truth confusion.
+- [ ] Implement single command installer via the wget/curl, example: curl -fsSL https://get.casaos.io | sudo bash, improve the readme as well
