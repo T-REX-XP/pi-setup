@@ -10,8 +10,11 @@
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now pi-setup-fleet.service
 #
-# Loginctl lingering (run without an interactive login):
+# User services do NOT run at boot until you log in (SSH/GUI), unless you enable
+# lingering so systemd keeps a user session for this account at boot:
 #   loginctl enable-linger "$USER"
+#   # or: sudo loginctl enable-linger pi
+# Check: loginctl show-user "$USER" -p Linger   → Linger=yes
 
 [Unit]
 Description=pi-setup fleet daemon

@@ -110,7 +110,28 @@ systemctl --user daemon-reload
 systemctl --user enable --now pi-setup-fleet.service
 ```
 
-For a machine without an interactive login, enable **lingering** so user units run at boot: `loginctl enable-linger "$USER"`.
+### After reboot the daemon only starts once you SSH — why?
+
+**`systemctl --user` units are tied to your login session.** Until something starts a session for that user (SSH, graphical login, etc.), systemd does **not** run your user services. That is normal default behavior, not a bug in this repo.
+
+To run the fleet daemon **at boot without logging in** (headless Pi, server, etc.), enable **lingering** for the account that owns the service (once per machine):
+
+```bash
+# As that user (e.g. after SSH):
+loginctl enable-linger "$USER"
+
+# Or from root, if your daemon user is e.g. `pi`:
+sudo loginctl enable-linger pi
+```
+
+Verify lingering is on:
+
+```bash
+loginctl show-user "$USER" -p Linger
+# Linger=yes
+```
+
+Then reboot; **`pi-setup-fleet.service`** should start without an SSH session. Confirm with the fleet dashboard heartbeats or, after SSH, `systemctl --user status pi-setup-fleet.service`.
 
 **Manual install:** copy `services/systemd/pi-setup-fleet.service` to `~/.config/systemd/user/` and set `WorkingDirectory` to your repo path (the default in the repo file is `%h/pi.dev` for a home-directory clone named `pi.dev`).
 

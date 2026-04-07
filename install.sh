@@ -162,8 +162,17 @@ Environment=PI_SETUP_DAEMON_PORT=4269
 WantedBy=default.target
 UNIT
     _ok "Wrote $UNIT_FILE"
-    _log "Enable with: systemctl --user daemon-reload && systemctl --user enable --now pi-setup-fleet.service"
-    _warn "User units start after login; for headless hosts use: loginctl enable-linger \"\$USER\""
+    echo ""
+    echo "  ── systemd user unit (fleet daemon) ─────────────────────────────"
+    _log "Enable & start:"
+    echo "       systemctl --user daemon-reload && systemctl --user enable --now pi-setup-fleet.service"
+    echo ""
+    _warn "Without lingering, this service only runs after you log in (e.g. SSH)."
+    _warn "For boot without login (headless Pi / server), run once:"
+    echo "       loginctl enable-linger \"\$USER\""
+    echo "    (or: sudo loginctl enable-linger <username>)"
+    echo "  ─────────────────────────────────────────────────────────────────"
+    echo ""
   fi
 fi
 
