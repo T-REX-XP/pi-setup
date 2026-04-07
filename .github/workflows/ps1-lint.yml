@@ -1,0 +1,54 @@
+name: PowerShell Lint
+
+on:
+  push:
+    paths:
+      - '**/*.ps1'
+  pull_request:
+    paths:
+      - '**/*.ps1'
+
+jobs:
+  ps-script-analyzer:
+    name: PSScriptAnalyzer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Find and lint .ps1 files
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Recurse -Filter '*.ps1' -Exclude 'node_modules' |
+                   Where-Object { $_.FullName -notmatch '[/\\]node_modules[/\\]' }
+
+          if ($files.Count -eq 0) {
+            Write-Host 'No .ps1 files found — skipping.'
+            exit 0
+          }
+
+          $rules = @(
+            'PSUseDeclaredVarsMoreThanAssignments',
+            'PSAvoidUsingCmdletAliases',
+            'PSAvoidTrailingWhitespace'
+          )
+
+          $allIssues = @()
+          foreach ($f in $files) {
+            Write-Host "Analyzing $($f.FullName)..."
+            $issues = Invoke-ScriptAnalyzer -Path $f.FullName -IncludeRule $rules
+            if ($issues) { $allIssues += $issues }
+          }
+
+          if ($allIssues.Count -gt 0) {
+            $allIssues | Format-Table -AutoSize
+            Write-Error "$($allIssues.Count) PSScriptAnalyzer issue(s) found."
+            exit 1
+          }
+
+          Write-Host "All $($files.Count) .ps1 file(s) passed PSScriptAnalyzer checks."
