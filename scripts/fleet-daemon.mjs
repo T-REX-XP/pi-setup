@@ -4,8 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+// ws is available as a transitive dep; fall back to null if missing
+let WebSocket;
+try { WebSocket = _require('ws'); } catch { WebSocket = null; }
 import { loadPiEnvFileSync, resolvePiEnvFilePath } from './lib/pi-env-file.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -32,6 +37,17 @@ const maxBackoffMs = Number(process.env.PI_SETUP_MAX_BACKOFF_MS || syncConfig.ma
 const workerUrl = process.env.PI_SETUP_WORKER_URL || syncConfig.workerUrl || '';
 const bootstrapToken = process.env.PI_SETUP_BOOTSTRAP_TOKEN;
 const machineId = process.env.PI_SETUP_MACHINE_ID || os.hostname();
+
+// ─── Relay agent connection ──────────────────────────────────────────────────
+const relayReconnectBaseMs = 5_000;
+const relayReconnectMaxMs  = 60_000;
+const relayWsUrl = workerUrl && bootstrapToken
+  ? workerUrl.replace(/^http/, 'ws').replace(/\/$/, '')
+    + '/v1/relay/' + encodeURIComponent(machineId)
+    + '?role=agent&token=' + encodeURIComponent(bootstrapToken)
+  : '';
+let _relayWs = null;
+let _relayRetryCount = 0;
 
 function log(level, event, details = {}) {
   console[level](JSON.stringify({
@@ -245,6 +261,120 @@ async function scanTmuxSessions() {
   }
 }
 
+// ─── Remote session launch (via relay WebSocket) ─────────────────────────────
+async function handleLaunchSession(ws, msg) {
+  const { commandId, prompt } = msg;
+  if (!commandId) return; // malformed — ignore
+
+  const realPi = process.env.PI_REAL_PI || 'pi';
+  const sessionName = 'pi-' + crypto.randomUUID().slice(0, 8);
+  const timestamp = new Date().toISOString();
+  const args = prompt && typeof prompt === 'string' && prompt.trim()
+    ? [prompt.trim()]
+    : [];
+
+  const childEnv = {
+    ...process.env,
+    PI_NO_TMUX: '1',
+    PI_SUBAGENT: '1',
+    PI_TMUX_SESSION: sessionName,
+  };
+
+  function sendAck(status, extra = {}) {
+    try {
+      ws.send(JSON.stringify({ type: 'command:ack', commandId, status, sessionName, timestamp: new Date().toISOString(), ...extra }));
+    } catch { /* ws may have closed */ }
+  }
+
+  try {
+    let launched = false;
+
+    if (os.platform() !== 'win32') {
+      // Attempt tmux (detached) — fall through on any error
+      try {
+        const tmuxArgs = [
+          'new-session', '-d',
+          '-s', sessionName,
+          '-e', `PI_TMUX_SESSION=${sessionName}`,
+          '-e', 'PI_NO_TMUX=1',
+          '-e', 'PI_SUBAGENT=1',
+          '--', realPi, ...args,
+        ];
+        await execFileAsync('tmux', tmuxArgs, { cwd: process.cwd(), timeout: 10_000 });
+        launched = true;
+        log('info', 'relay.launch.tmux', { commandId, sessionName });
+      } catch {
+        // tmux not installed or failed— fall through to detached spawn
+      }
+    }
+
+    if (!launched) {
+      const child = spawn(realPi, args, {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: 'ignore',
+        env: childEnv,
+      });
+      child.unref();
+      log('info', 'relay.launch.spawn', { commandId, sessionName });
+    }
+
+    sendAck('launched');
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    log('error', 'relay.launch.failed', { commandId, error: errMsg });
+    sendAck('error', { error: errMsg });
+  }
+}
+
+function scheduleRelayReconnect() {
+  _relayRetryCount++;
+  const delay = Math.min(relayReconnectBaseMs * 2 ** (_relayRetryCount - 1), relayReconnectMaxMs);
+  log('info', 'relay.reconnect.scheduled', { attempt: _relayRetryCount, delayMs: delay });
+  setTimeout(connectRelayAgent, delay);
+}
+
+function connectRelayAgent() {
+  if (!relayWsUrl || !WebSocket) {
+    if (!relayWsUrl) log('info', 'relay.agent.skipped', { reason: 'workerUrl or bootstrapToken not set' });
+    if (!WebSocket)  log('warn', 'relay.agent.skipped', { reason: 'ws package not available' });
+    return;
+  }
+
+  const ws = new WebSocket(relayWsUrl);
+  _relayWs = ws;
+
+  ws.on('open', () => {
+    _relayRetryCount = 0;
+    log('info', 'relay.agent.connected', { machineId });
+  });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.type === 'command:launch-session') {
+      handleLaunchSession(ws, msg).catch((e) =>
+        log('error', 'relay.command.error', { error: e instanceof Error ? e.message : String(e) })
+      );
+      return;
+    }
+    if (msg.type && msg.type.startsWith('command:')) {
+      log('warn', 'relay.unknown-command', { type: msg.type });
+    }
+  });
+
+  ws.on('close', (code) => {
+    log('info', 'relay.agent.disconnected', { code });
+    _relayWs = null;
+    scheduleRelayReconnect();
+  });
+
+  ws.on('error', (err) => {
+    log('warn', 'relay.agent.error', { error: err.message });
+    // on('close') fires next — reconnect is handled there
+  });
+}
+
 async function pushSessions() {
   if (!workerUrl || !bootstrapToken) return;
   const pushed = await loadPushedSessions();
@@ -354,6 +484,10 @@ setInterval(async () => {
 }, sessionScanIntervalMs);
 // Initial session scan after 30s
 setTimeout(() => pushSessions().catch(() => {}), 30_000);
+
+// Connect to relay as agent so the dashboard can launch sessions remotely
+// (delayed 5s so the first heartbeat has time to confirm connectivity)
+setTimeout(connectRelayAgent, 5_000);
 
 const server = http.createServer(async (req, res) => {
   const reqId = requestId(req);

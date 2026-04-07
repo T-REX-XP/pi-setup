@@ -311,6 +311,104 @@ export function openRelaySocket(machineId: string, role: 'observer'): WebSocket 
   return ws;
 }
 
+// ─── Remote session launch ──────────────────────────────────────────────────────────
+
+/** Command sent over the relay WebSocket to the daemon agent. */
+export type LaunchSessionCommand = {
+  type: 'command:launch-session';
+  commandId: string;
+  prompt?: string; // optional initial prompt; daemon always runs in the repo cwd (not user-controllable)
+};
+
+/** Ack sent back by the daemon once the session subprocess has been started. */
+export type CommandAck = {
+  type: 'command:ack';
+  commandId: string;
+  status: 'launched' | 'error';
+  sessionName?: string;
+  error?: string;
+  timestamp: string;
+};
+
+// Symbol keyed map stored on the ws instance to avoid replacing onmessage.
+const kPendingCommands = Symbol('pendingCommands');
+
+type PendingEntry = {
+  resolve: (ack: CommandAck) => void;
+  reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+/**
+ * Send a launch-session command through an already-open relay WebSocket.
+ * Returns a Promise that resolves with the CommandAck when the daemon responds,
+ * or rejects on timeout (30 s) or error ack.
+ *
+ * The caller's page MUST call dispatchCommandAck() inside its existing
+ * onmessage handler when msg.type === 'command:ack'.
+ *
+ * Auth note: the bootstrap token is intentionally global-admin (v1 scope).
+ */
+export function sendLaunchSession(
+  ws: WebSocket,
+  prompt?: string,
+  timeoutMs = 30_000,
+): Promise<CommandAck> {
+  return new Promise<CommandAck>((resolve, reject) => {
+    if (ws.readyState !== WebSocket.OPEN) {
+      reject(new ApiError('Relay WebSocket is not connected.', 'network'));
+      return;
+    }
+
+    const commandId = crypto.randomUUID();
+    const command: LaunchSessionCommand = { type: 'command:launch-session', commandId };
+    if (prompt && prompt.trim()) command.prompt = prompt.trim();
+
+    const map: Map<string, PendingEntry> = ((ws as unknown as Record<symbol, Map<string, PendingEntry>>)[kPendingCommands] ??= new Map());
+
+    const timer = setTimeout(() => {
+      map.delete(commandId);
+      reject(new ApiError(
+        'Launch timed out — the agent did not respond within 30 s. The session may still have started.',
+        'timeout',
+      ));
+    }, timeoutMs);
+
+    map.set(commandId, {
+      resolve: (ack) => { clearTimeout(timer); map.delete(commandId); resolve(ack); },
+      reject: (err) => { clearTimeout(timer); map.delete(commandId); reject(err); },
+      timer,
+    });
+
+    try {
+      ws.send(JSON.stringify(command));
+    } catch (err) {
+      map.delete(commandId);
+      clearTimeout(timer);
+      reject(new ApiError(
+        `Failed to send command: ${err instanceof Error ? err.message : String(err)}`,
+        'network',
+      ));
+    }
+  });
+}
+
+/**
+ * Call this from the page's existing onmessage handler when msg.type === 'command:ack'.
+ * Returns true if the ack was consumed by a pending sendLaunchSession promise.
+ */
+export function dispatchCommandAck(ws: WebSocket, ack: CommandAck): boolean {
+  const map = (ws as unknown as Record<symbol, Map<string, PendingEntry>>)[kPendingCommands];
+  const entry = map?.get(ack.commandId);
+  if (!entry) return false;
+  if (ack.status === 'launched') {
+    entry.resolve(ack);
+  } else {
+    entry.reject(new ApiError(ack.error || 'Agent reported an error launching the session.', 'unknown'));
+  }
+  return true;
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

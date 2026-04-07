@@ -135,13 +135,18 @@ fi
 
 _ok "PATH and PI_REAL_PI written to $PROFILE"
 
-# ─── 6. systemd user unit (Linux) — fleet daemon ────────────────────────────
+# ─── 6. systemd units (Linux) — fleet daemon ───────────────────────────────
+# User unit: no sudo to install; needs login or loginctl enable-linger for boot.
+# System unit: sudo to install; starts at multi-user.target as User= (no login).
 if [[ "$(uname -s)" == "Linux" ]] && command -v systemctl &>/dev/null; then
-  _log "Writing systemd user unit for the fleet daemon…"
+  _log "Writing systemd units for the fleet daemon…"
   NODE_BIN="$(command -v node || true)"
   if [[ -z "$NODE_BIN" ]]; then
-    _warn "node not found in PATH — skipping pi-setup-fleet.service"
+    _warn "node not found in PATH — skipping pi-setup-fleet systemd units"
   else
+    RUN_USER="$(id -un)"
+    RUN_GROUP="$(id -gn)"
+
     USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
     mkdir -p "$USER_UNIT_DIR"
     UNIT_FILE="$USER_UNIT_DIR/pi-setup-fleet.service"
@@ -161,16 +166,46 @@ Environment=PI_SETUP_DAEMON_PORT=4269
 [Install]
 WantedBy=default.target
 UNIT
-    _ok "Wrote $UNIT_FILE"
+    _ok "Wrote $UNIT_FILE (user unit)"
+
+    PI_SETUP_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/pi-setup"
+    mkdir -p "$PI_SETUP_CFG"
+    SYSTEM_UNIT_FILE="$PI_SETUP_CFG/pi-setup-fleet.system.service"
+    cat >"$SYSTEM_UNIT_FILE" <<UNIT
+[Unit]
+Description=pi-setup fleet daemon (system; starts at boot without login)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$RUN_USER
+Group=$RUN_GROUP
+WorkingDirectory=$REPO_ROOT
+ExecStart=$NODE_BIN $REPO_ROOT/scripts/fleet-daemon.mjs
+Restart=always
+RestartSec=5
+Environment=PI_SETUP_DAEMON_PORT=4269
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    _ok "Wrote $SYSTEM_UNIT_FILE (copy with sudo for system service)"
+
     echo ""
-    echo "  ── systemd user unit (fleet daemon) ─────────────────────────────"
-    _log "Enable & start:"
-    echo "       systemctl --user daemon-reload && systemctl --user enable --now pi-setup-fleet.service"
+    echo "  ── systemd: choose ONE of these ────────────────────────────────"
     echo ""
-    _warn "Without lingering, this service only runs after you log in (e.g. SSH)."
-    _warn "For boot without login (headless Pi / server), run once:"
-    echo "       loginctl enable-linger \"\$USER\""
-    echo "    (or: sudo loginctl enable-linger <username>)"
+    echo "  A) User service (no sudo; install under your account):"
+    echo "       systemctl --user daemon-reload"
+    echo "       systemctl --user enable --now pi-setup-fleet.service"
+    echo "     Without lingering, it starts only after you log in (SSH/GUI)."
+    echo "     Boot without login:  loginctl enable-linger \"\$USER\""
+    echo ""
+    echo "  B) System service (sudo; starts at boot, no login or lingering):"
+    echo "       sudo cp \"$SYSTEM_UNIT_FILE\" /etc/systemd/system/pi-setup-fleet.service"
+    echo "       sudo systemctl daemon-reload && sudo systemctl enable --now pi-setup-fleet.service"
+    echo "     Runs as User=$RUN_USER with WorkingDirectory=$REPO_ROOT"
+    echo "     If you used (A) before:  systemctl --user disable --now pi-setup-fleet.service"
     echo "  ─────────────────────────────────────────────────────────────────"
     echo ""
   fi

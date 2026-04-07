@@ -103,37 +103,62 @@ See [`SETUP.md`](SETUP.md) for CORS notes and troubleshooting.
 
 ## Service install (systemd)
 
-On **Linux**, **`./install.sh`** writes **`~/.config/systemd/user/pi-setup-fleet.service`** with `WorkingDirectory` and `ExecStart` pointing at **this clone** (so `.env.runtime` and `sync.json` in the repo root are picked up). Then:
+We support two styles. Use **only one** (both would fight over the same daemon port).
+
+### Why `systemctl --user` exists
+
+**User units** live under `~/.config/systemd/user/` and are installed **without sudo**. They run as you, with your home and repo permissions. The tradeoff is systemd’s default: **your user manager often starts only when you log in** (SSH, desktop), unless you enable [lingering](#after-reboot-the-daemon-only-starts-once-you-ssh--why).
+
+That default is why we document **`loginctl enable-linger`** for headless machines if you stay on a user unit.
+
+### System unit (boot without login, no lingering)
+
+A **system** unit is installed under **`/etc/systemd/system/`** with **`sudo`**. It is started at **`multi-user.target`** (normal boot). The service still runs the daemon **as your normal UNIX user** (`User=` / `Group=` in the unit), so it can read **`~/.env.runtime`** in the repo — you are not running Node as root.
+
+On Linux, **`./install.sh`** writes a ready-made file:
+
+**`~/.config/pi-setup/pi-setup-fleet.system.service`**
+
+Install it:
+
+```bash
+sudo cp ~/.config/pi-setup/pi-setup-fleet.system.service /etc/systemd/system/pi-setup-fleet.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-setup-fleet.service
+sudo systemctl status pi-setup-fleet.service
+```
+
+If you previously enabled the **user** unit, disable it first:
+
+```bash
+systemctl --user disable --now pi-setup-fleet.service
+```
+
+Example for manual editing: [`services/systemd/pi-setup-fleet.system.service.example`](../services/systemd/pi-setup-fleet.system.service.example).
+
+### User unit (no sudo)
+
+**`./install.sh`** also writes **`~/.config/systemd/user/pi-setup-fleet.service`**. Enable with:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now pi-setup-fleet.service
 ```
 
-### After reboot the daemon only starts once you SSH — why?
+### After reboot the user unit only starts once you SSH — why?
 
 **`systemctl --user` units are tied to your login session.** Until something starts a session for that user (SSH, graphical login, etc.), systemd does **not** run your user services. That is normal default behavior, not a bug in this repo.
 
-To run the fleet daemon **at boot without logging in** (headless Pi, server, etc.), enable **lingering** for the account that owns the service (once per machine):
+To keep a **user** unit but still run at boot without logging in, enable **lingering** (once per machine):
 
 ```bash
-# As that user (e.g. after SSH):
 loginctl enable-linger "$USER"
-
-# Or from root, if your daemon user is e.g. `pi`:
-sudo loginctl enable-linger pi
+# or: sudo loginctl enable-linger pi
 ```
 
-Verify lingering is on:
+Verify: `loginctl show-user "$USER" -p Linger` → `Linger=yes`.
 
-```bash
-loginctl show-user "$USER" -p Linger
-# Linger=yes
-```
-
-Then reboot; **`pi-setup-fleet.service`** should start without an SSH session. Confirm with the fleet dashboard heartbeats or, after SSH, `systemctl --user status pi-setup-fleet.service`.
-
-**Manual install:** copy `services/systemd/pi-setup-fleet.service` to `~/.config/systemd/user/` and set `WorkingDirectory` to your repo path (the default in the repo file is `%h/pi.dev` for a home-directory clone named `pi.dev`).
+**Manual user-unit install:** copy `services/systemd/pi-setup-fleet.service` to `~/.config/systemd/user/` and set `WorkingDirectory` to your repo path (the default in the repo file is `%h/pi.dev` for a home-directory clone named `pi.dev`).
 
 ---
 

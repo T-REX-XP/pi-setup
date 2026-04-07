@@ -4,9 +4,10 @@
   import { goto } from '$app/navigation';
   import {
     fetchHeartbeats, fetchSessions, fetchMachines, deleteMachine, openRelaySocket, withRetry,
+    sendLaunchSession, dispatchCommandAck,
     machineStatus, timeAgo, formatBytes, userMessage, formatMachineOs,
     ApiError,
-    type FleetHeartbeat, type Session, type Machine,
+    type FleetHeartbeat, type Session, type Machine, type CommandAck,
   } from '$lib/api';
   import PlatformIcon from '$lib/PlatformIcon.svelte';
 
@@ -47,6 +48,7 @@
     relayDestroyed = true;
     if (relayReconnectTimer !== null) clearTimeout(relayReconnectTimer);
     clearInterval(interval);
+    if (launchSuccessTimer !== null) clearTimeout(launchSuccessTimer);
     // Null handlers before closing so onclose doesn't schedule another reconnect
     if (ws) { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); ws = null; }
   });
@@ -110,6 +112,11 @@
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
+          // Dispatch command:ack to pending sendLaunchSession promises (do not show in relay log)
+          if (msg.type === 'command:ack' && ws) {
+            dispatchCommandAck(ws, msg as CommandAck);
+            return;
+          }
           if (msg.type === 'relay:welcome') { agentOnline = msg.agentOnline; return; }
           if (msg.type === 'relay:agent-connected') { agentOnline = true; return; }
           if (msg.type === 'relay:agent-disconnected') { agentOnline = false; return; }
@@ -140,9 +147,43 @@
 
   $: status = heartbeat ? machineStatus(heartbeat) as 'online'|'stale'|'offline' : 'offline';
 
+  async function launchSession() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      launchError = 'Relay is not connected — cannot send command.';
+      return;
+    }
+    if (!agentOnline) {
+      launchError = 'Agent is offline — the daemon must be running to launch sessions.';
+      return;
+    }
+    launching = true;
+    launchError = '';
+    launchSuccess = '';
+    try {
+      const ack = await sendLaunchSession(ws, launchPrompt || undefined);
+      launchSuccess = `Session ${ack.sessionName ?? 'unknown'} launched ✓`;
+      launchPrompt = '';
+      if (launchSuccessTimer !== null) clearTimeout(launchSuccessTimer);
+      launchSuccessTimer = setTimeout(() => { launchSuccess = ''; }, 8_000);
+      // Refresh sessions list after a short delay (session file may not exist yet)
+      setTimeout(load, 3_000);
+    } catch (e) {
+      launchError = userMessage(e);
+    } finally {
+      launching = false;
+    }
+  }
+
   let showDeleteModal = false;
   let deleting = false;
   let deleteError = '';
+
+  // ── Launch session state ──
+  let launching = false;
+  let launchPrompt = '';
+  let launchError = '';
+  let launchSuccess = '';
+  let launchSuccessTimer: ReturnType<typeof setTimeout> | null = null;
 
   function openDeleteModal() { showDeleteModal = true; deleteError = ''; }
   function closeDeleteModal() { showDeleteModal = false; deleting = false; deleteError = ''; }
@@ -262,6 +303,39 @@
   </div>
 </div>
 
+<!-- ── Launch remote session ── -->
+{#if relayConnected && agentOnline}
+<div class="card mt-4">
+  <div class="relay-header mb-3">
+    <span class="relay-title">Launch Remote Session</span>
+  </div>
+  <div class="launch-row">
+    <input
+      type="text"
+      class="input launch-input"
+      placeholder="Optional prompt — e.g. 'fix the login bug'"
+      bind:value={launchPrompt}
+      disabled={launching}
+      on:keydown={(e) => { if (e.key === 'Enter' && !launching) launchSession(); }}
+    />
+    <button
+      type="button"
+      class="btn-launch"
+      on:click={launchSession}
+      disabled={launching}
+    >
+      {launching ? 'Launching…' : 'Launch Session'}
+    </button>
+  </div>
+  {#if launchError}
+    <div class="error-banner mt-2" role="alert">{launchError}</div>
+  {/if}
+  {#if launchSuccess}
+    <div class="success-banner mt-2" role="status">{launchSuccess}</div>
+  {/if}
+</div>
+{/if}
+
 <!-- ── Recent sessions ── -->
 <div class="mt-6">
   <h2 class="section-title mb-4">Recent Sessions</h2>
@@ -314,6 +388,34 @@
 {/if}
 
 <style>
+  .launch-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .launch-input {
+    flex: 1;
+  }
+  .btn-launch {
+    white-space: nowrap;
+    padding: 0.375rem 0.875rem;
+    border-radius: 0.375rem;
+    background: var(--color-accent, #3b82f6);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: opacity 0.15s;
+  }
+  .btn-launch:hover:not(:disabled) { opacity: 0.88; }
+  .btn-launch:disabled { opacity: 0.45; cursor: not-allowed; }
+  .success-banner {
+    background: var(--color-success-bg, rgba(16,185,129,0.12));
+    color: var(--color-success-text, #4ade80);
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+  }
   .back { display: inline-block; }
   .banner-row-text {
     flex: 1;

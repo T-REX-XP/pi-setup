@@ -1,4 +1,7 @@
-# User systemd unit — fleet daemon (Linux).
+# User systemd unit — fleet daemon (Linux). No sudo; needs login or
+# loginctl enable-linger for boot. For boot without login without lingering,
+# use the system unit from ./install.sh → ~/.config/pi-setup/pi-setup-fleet.system.service
+#
 # Prefer: run ./install.sh from your clone; on Linux it writes this file to
 #   ~/.config/systemd/user/pi-setup-fleet.service
 # with WorkingDirectory set to your actual repo path.

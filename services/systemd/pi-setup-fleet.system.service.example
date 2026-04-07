@@ -1,0 +1,28 @@
+# Copy to /etc/systemd/system/pi-setup-fleet.service and adjust User/Group/paths.
+# Prefer: ./install.sh writes ~/.config/pi-setup/pi-setup-fleet.system.service with
+# your real paths — then sudo cp that file to /etc/systemd/system/.
+#
+# Before enabling, disable the user unit if you used it (only one should run):
+#   systemctl --user disable --now pi-setup-fleet.service
+#
+#   sudo cp …/pi-setup-fleet.system.service.example /etc/systemd/system/pi-setup-fleet.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pi-setup-fleet.service
+
+[Unit]
+Description=pi-setup fleet daemon (system; starts at boot without login)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Account that owns the repo clone and .env.runtime:
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/pi.dev
+ExecStart=/usr/bin/node /home/pi/pi.dev/scripts/fleet-daemon.mjs
+Restart=always
+RestartSec=5
+Environment=PI_SETUP_DAEMON_PORT=4269
+
+[Install]
+WantedBy=multi-user.target
