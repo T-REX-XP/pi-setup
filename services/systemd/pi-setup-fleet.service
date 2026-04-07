@@ -1,10 +1,26 @@
+# User systemd unit — fleet daemon (Linux).
+# Prefer: run ./install.sh from your clone; on Linux it writes this file to
+#   ~/.config/systemd/user/pi-setup-fleet.service
+# with WorkingDirectory set to your actual repo path.
+#
+# Manual install: copy to ~/.config/systemd/user/, set WorkingDirectory to this
+# repo (same directory as package.json). The daemon loads .env.runtime from
+# that directory automatically — do not commit .env.runtime.
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now pi-setup-fleet.service
+#
+# Loginctl lingering (run without an interactive login):
+#   loginctl enable-linger "$USER"
+
 [Unit]
 Description=pi-setup fleet daemon
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/pi-setup
+# Default matches install.sh / README: git clone … pi.dev
+WorkingDirectory=%h/pi.dev
 ExecStart=/usr/bin/env node scripts/fleet-daemon.mjs
 Restart=always
 RestartSec=5
