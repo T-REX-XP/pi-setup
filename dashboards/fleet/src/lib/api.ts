@@ -100,10 +100,36 @@ export type Machine = {
   hostname: string;
   platform: string;
   arch: string;
+  /** Kernel/OS release from enrollment (e.g. Darwin kernel version on macOS). */
+  os_release?: string | null;
+  /** Client that performed enroll (e.g. scripts/pi-enroll.mjs). */
+  enrolled_from?: string | null;
   enrolled_at: string | null;
   last_seen_at: string | null;
   status: string;
 };
+
+/** Short OS label for UI (maps Node `platform` to friendly name). */
+export function osDisplayName(platform: string): string {
+  const p = (platform || '').toLowerCase();
+  if (p === 'darwin') return 'macOS';
+  if (p === 'win32') return 'Windows';
+  if (p === 'linux') return 'Linux';
+  if (p.includes('bsd')) return 'BSD';
+  return platform || 'Unknown';
+}
+
+/** One line: friendly OS · release · arch (heartbeat overrides live arch/platform when present). */
+export function formatMachineOs(
+  m: Pick<Machine, 'platform' | 'arch' | 'os_release'> | null | undefined,
+  hb?: Pick<FleetHeartbeat, 'platform' | 'arch'> | null,
+): string {
+  const plat = hb?.platform || m?.platform || '';
+  const arch = hb?.arch || m?.arch || '';
+  const rel = m?.os_release?.trim() || '';
+  const bits = [plat ? osDisplayName(plat) : '', rel, arch].filter(Boolean);
+  return bits.length ? bits.join(' · ') : '—';
+}
 
 export type FleetHeartbeat = {
   machineId: string;

@@ -78,9 +78,9 @@
 
 <div class="flex items-center justify-between mb-4">
   <div>
-    <h1>Sessions</h1>
+    <h1 class="page-title">Sessions</h1>
     {#if machineFilter}
-      <p class="text-muted text-sm mt-1">Filtered by machine: <code>{machineFilter}</code>
+      <p class="text-muted text-sm mt-1">Filtered by machine: <code class="font-mono">{machineFilter}</code>
         <a href="/sessions">Clear</a>
       </p>
     {:else}
@@ -88,22 +88,28 @@
     {/if}
   </div>
   <div class="flex gap-2 items-center">
-    {#if loading}<span class="spinner" />{/if}
-    <button class="btn" on:click={load}>↻ Refresh</button>
+    {#if loading}<span class="spinner" aria-hidden="true" />{/if}
+    <button type="button" class="btn" on:click={load}>
+      <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+      Refresh
+    </button>
+    <a href="/" class="btn btn-ghost">Machines</a>
   </div>
 </div>
 
 {#if error}
-  <div class="error-banner card">{error}</div>
+  <div class="error-banner" role="alert">{error}</div>
 {/if}
 
 {#if sessions.length === 0 && !loading}
-  <div class="card empty-state">
+  <div class="card card--static empty-state empty-state--left">
     {#if sessionsFetchFailed}
       <p>Sessions could not be loaded. Fix the error above (URL, token, or network) and refresh.</p>
     {:else}
-      <p class="empty-lead"><strong>No sessions in the Worker yet.</strong> The dashboard reads D1; rows are created when the fleet daemon POSTs Pi transcripts.</p>
-      <ul class="empty-hints">
+      <p class="empty-state-lead"><strong>No sessions in the Worker yet.</strong> The dashboard reads D1; rows are created when the fleet daemon POSTs Pi transcripts.</p>
+      <ul class="empty-state-hints">
         <li>Run <code>npm run daemon</code> from the repo root on a machine where you use <code>pi</code>.</li>
         <li>Ensure <code>PI_SETUP_WORKER_URL</code> and <code>PI_SETUP_BOOTSTRAP_TOKEN</code> are set (e.g. in <code>.env.runtime</code> after enroll).</li>
         <li>The daemon must use the <strong>same current working directory</strong> as your Pi sessions — it only uploads files under <code>~/.pi/agent/sessions/</code> for that cwd.</li>
@@ -112,7 +118,7 @@
     {/if}
   </div>
 {:else}
-  <div class="card table-card">
+  <div class="card card--static table-card">
     <table>
       <thead>
         <tr>
@@ -131,7 +137,7 @@
         {#each sessions as s (s.session_id)}
           <tr>
             <td class="session-id">
-              <code>{s.session_id.slice(0, 8)}…</code>
+              <code class="font-mono">{s.session_id.slice(0, 8)}…</code>
             </td>
             <td>
               <a href="/machine/{encodeURIComponent(s.machine_id)}">{s.machine_id.split('.')[0]}</a>
@@ -151,19 +157,8 @@
 {/if}
 
 <style>
-  h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
-  .table-card { padding: 0; overflow: hidden; }
-  .session-id code { font-size: 0.8rem; color: var(--text-muted); font-family: 'SF Mono', monospace; }
-  .error-banner { background: var(--red-dim); border-color: var(--red); color: var(--red); margin-bottom: 1rem; }
-  .empty-state { color: var(--text-muted); padding: 2rem 1.5rem; max-width: 560px; margin: 0 auto; }
-  .empty-lead { text-align: left; margin-bottom: 1rem; line-height: 1.5; }
-  .empty-hints {
-    text-align: left;
-    margin: 0;
-    padding-left: 1.25rem;
-    line-height: 1.55;
-    font-size: 0.9rem;
+  .session-id code {
+    font-size: 0.8rem;
+    color: var(--text-muted);
   }
-  .empty-hints li { margin: 0.4rem 0; }
-  .empty-hints code { font-size: 0.82rem; color: var(--text); }
 </style>

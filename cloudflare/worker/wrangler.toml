@@ -22,6 +22,7 @@ new_sqlite_classes = ["PIRelayDurableObject"]
 
 [vars]
 PI_SETUP_ALLOWED_ORIGIN = "*"
+PI_SETUP_REPO_URL = ""  # Set to your git repo URL; served in /bootstrap.sh
 # Required secrets (set via: wrangler secret put <NAME>):
 # - PI_SETUP_BOOTSTRAP_TOKEN
 # - PI_SETUP_ENROLLMENT_SIGNING_KEY

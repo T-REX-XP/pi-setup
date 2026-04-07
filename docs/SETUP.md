@@ -68,6 +68,14 @@ wrangler d1 execute pi-setup-db --file=schema.sql --remote
 
 Use `--remote` so it targets the hosted D1 database (not the local dev DB).
 
+**Already have a `machines` table?** If enrollment OS columns are missing, run once:
+
+```bash
+wrangler d1 execute pi-setup-db --file=schema-migrate-machine-os.sql --remote
+```
+
+(`schema-migrate-machine-os.sql` adds `os_release` and `enrolled_from`; ignore errors if columns already exist.)
+
 ### 3. Create secrets (tokens)
 
 Generate two **different** random strings (see menu option **11** or):

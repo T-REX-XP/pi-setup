@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# bin/pi — Thin tmux session wrapper for the `pi` coding agent.
+#
+# Place this directory first in PATH (done by install.sh).  Every interactive
+# `pi` invocation is wrapped in a named tmux session so the fleet daemon can
+# discover and track active agent runs.
+#
+# Skip conditions (runs real pi directly):
+#   - Already inside a tmux session (TMUX is set)
+#   - PI_NO_TMUX=1 or PI_SUBAGENT=1
+#   - Any of --print / -p / --no-session in argv (subagent/daemon mode)
+#   - tmux is not installed
+#
+# Install: ./install.sh  (sets PI_REAL_PI and prepends bin/ to PATH)
+
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ─── Locate the real pi binary (not this wrapper) ───────────────────────────
+_find_real_pi() {
+  # 1. Explicit env override — set by install.sh in shell profile
+  if [[ -n "${PI_REAL_PI:-}" ]] && [[ -x "$PI_REAL_PI" ]]; then
+    echo "$PI_REAL_PI"; return 0
+  fi
+
+  # 2. Walk PATH, skip our own bin/ directory
+  local old_ifs="$IFS"
+  IFS=':'
+  for dir in $PATH; do
+    IFS="$old_ifs"
+    [[ "$dir" == "$SELF_DIR" ]] && continue
+    local candidate="$dir/pi"
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"; return 0
+    fi
+  done
+  IFS="$old_ifs"
+
+  # 3. Well-known npm global paths (Homebrew / Linux)
+  for p in \
+      "/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/bin/pi.js" \
+      "/opt/homebrew/bin/pi" \
+      "$HOME/.npm-global/lib/node_modules/@mariozechner/pi-coding-agent/bin/pi.js" \
+      "/usr/local/lib/node_modules/@mariozechner/pi-coding-agent/bin/pi.js" \
+      "/usr/lib/node_modules/@mariozechner/pi-coding-agent/bin/pi.js"; do
+    [[ -f "$p" ]] && echo "$p" && return 0
+  done
+
+  echo ""
+}
+
+REAL_PI="$(_find_real_pi)"
+
+if [[ -z "$REAL_PI" ]]; then
+  echo "bin/pi: cannot locate real pi binary." >&2
+  echo "  Set PI_REAL_PI=/path/to/pi in your shell profile, or re-run install.sh." >&2
+  exit 1
+fi
+
+# ─── Skip-tmux conditions ────────────────────────────────────────────────────
+
+# Already inside a tmux session
+[[ -n "${TMUX:-}" ]] && exec "$REAL_PI" "$@"
+
+# Explicit opt-out flags
+[[ "${PI_NO_TMUX:-0}" == "1" ]] && exec "$REAL_PI" "$@"
+[[ "${PI_SUBAGENT:-0}" == "1" ]]  && exec "$REAL_PI" "$@"
+
+# Non-interactive / subagent argv flags (--print -p --no-session)
+for _arg in "$@"; do
+  case "$_arg" in
+    --print|-p|--no-session)
+      exec "$REAL_PI" "$@"
+      ;;
+  esac
+done
+
+# tmux not installed
+command -v tmux &>/dev/null || exec "$REAL_PI" "$@"
+
+# ─── Create a named tmux session ────────────────────────────────────────────
+SESSION="pi-$(openssl rand -hex 4)"
+
+# Write a self-deleting launcher script so args are passed safely through tmux
+_TMP="$(mktemp /tmp/.pi-sess-XXXXXXXXXX.sh)"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'rm -f %q\n' "$_TMP"
+  printf 'exec'
+  printf ' %q' "$REAL_PI" "$@"
+  printf '\n'
+} > "$_TMP"
+chmod +x "$_TMP"
+
+# Export session name so the daemon and pi itself can read it
+export PI_TMUX_SESSION="$SESSION"
+# Prevent recursive wrapping inside the session
+export PI_NO_TMUX=1
+
+exec tmux new-session \
+  -s "$SESSION" \
+  -e "PI_TMUX_SESSION=$SESSION" \
+  -e "PI_NO_TMUX=1" \
+  "$_TMP"

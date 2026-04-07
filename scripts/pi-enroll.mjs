@@ -153,6 +153,7 @@ if (enrollmentToken) {
       hostname: os.hostname(),
       platform: os.platform(),
       arch: os.arch(),
+      osRelease: os.release(),
       enrolledFrom: 'scripts/pi-enroll.mjs',
     }),
   });

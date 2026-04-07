@@ -2,13 +2,15 @@
 -- Run: wrangler d1 execute pi-setup-db --file=cloudflare/worker/schema.sql
 
 CREATE TABLE IF NOT EXISTS machines (
-  machine_id   TEXT PRIMARY KEY,
-  hostname     TEXT NOT NULL,
-  platform     TEXT,
-  arch         TEXT,
-  enrolled_at  TEXT,
-  last_seen_at TEXT,
-  status       TEXT NOT NULL DEFAULT 'unknown'
+  machine_id    TEXT PRIMARY KEY,
+  hostname      TEXT NOT NULL,
+  platform      TEXT,
+  arch          TEXT,
+  os_release    TEXT,
+  enrolled_from TEXT,
+  enrolled_at   TEXT,
+  last_seen_at  TEXT,
+  status        TEXT NOT NULL DEFAULT 'unknown'
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

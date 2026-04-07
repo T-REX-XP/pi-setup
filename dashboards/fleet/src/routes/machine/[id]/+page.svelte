@@ -3,17 +3,20 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import {
-    fetchHeartbeats, fetchSessions, deleteMachine, openRelaySocket, withRetry,
-    machineStatus, timeAgo, formatBytes, userMessage,
+    fetchHeartbeats, fetchSessions, fetchMachines, deleteMachine, openRelaySocket, withRetry,
+    machineStatus, timeAgo, formatBytes, userMessage, formatMachineOs,
     ApiError,
-    type FleetHeartbeat, type Session,
+    type FleetHeartbeat, type Session, type Machine,
   } from '$lib/api';
+  import PlatformIcon from '$lib/PlatformIcon.svelte';
 
   export let params: { id?: string } = {};
 
   const machineId = decodeURIComponent(params.id ?? $page.params.id ?? '');
 
   let heartbeat: FleetHeartbeat | undefined;
+  /** D1 row (enrollment metadata: os_release, enrolled_from, …). */
+  let d1Machine: Machine | null = null;
   let sessions: Session[] = [];
   let loading = true;
   let error = '';
@@ -50,9 +53,10 @@
 
   async function load() {
     try {
-      const [hb, s] = await Promise.allSettled([
+      const [hb, s, mac] = await Promise.allSettled([
         withRetry(() => fetchHeartbeats()),
         withRetry(() => fetchSessions(machineId)),
+        withRetry(() => fetchMachines()),
       ]);
       const errParts: string[] = [];
       if (hb.status === 'fulfilled') {
@@ -64,6 +68,11 @@
         sessions = s.value.sessions;
       } else {
         errParts.push(`Sessions: ${userMessage(s.reason)}`);
+      }
+      if (mac.status === 'fulfilled') {
+        d1Machine = mac.value.machines.find((x) => x.machine_id === machineId) ?? null;
+      } else {
+        d1Machine = null;
       }
       error = errParts.join(' — ');
     } catch (e) {
@@ -161,53 +170,67 @@
 
 <a href="/" class="back text-muted text-sm">← Back to fleet</a>
 
-<div class="flex items-center justify-between mt-4 mb-4">
-  <div>
-    <h1>{heartbeat?.hostname ?? machineId}</h1>
-    <p class="text-muted text-sm mt-1">{machineId}</p>
+<div class="flex items-center justify-between mt-4 mb-4 gap-3">
+  <div class="flex items-center gap-3 min-w-0">
+    <PlatformIcon platform={heartbeat?.platform ?? d1Machine?.platform ?? ''} size={40} />
+    <div class="min-w-0">
+      <h1 class="page-title truncate">{heartbeat?.hostname ?? d1Machine?.hostname ?? machineId}</h1>
+      <p class="text-muted text-sm mt-1 truncate">{machineId}</p>
+      {#if d1Machine || heartbeat}
+        <p class="text-muted text-xs mt-1">{formatMachineOs(d1Machine, heartbeat)}</p>
+      {/if}
+      {#if d1Machine?.enrolled_from}
+        <p class="text-muted text-xs mt-1">Enrolled via {d1Machine.enrolled_from}</p>
+      {/if}
+    </div>
   </div>
-  <div class="flex gap-2 items-center">
+  <div class="flex gap-2 items-center flex-shrink-0">
     <span class="badge {status}">{status}</span>
-    <button class="btn btn-danger btn-sm" on:click={openDeleteModal}>Remove</button>
+    <button type="button" class="btn btn-danger btn-sm" on:click={openDeleteModal}>Remove</button>
   </div>
 </div>
 
 {#if error}
-  <div class="error-banner card">{error}</div>
+  <div class="error-banner" role="alert">{error}</div>
 {/if}
 {#if relayError}
-  <div class="error-banner card relay-warn">
-    {relayError}
+  <div class="error-banner error-banner--warn banner-row" role="status">
+    <span class="banner-row-text">{relayError}</span>
     {#if relayGaveUp}
-      <button class="btn btn-sm" style="margin-left:1rem" on:click={manualReconnect}>↻ Reconnect</button>
+      <button type="button" class="btn btn-sm flex-shrink-0" on:click={manualReconnect}>
+        <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        Reconnect
+      </button>
     {/if}
   </div>
 {/if}
 
 {#if heartbeat}
   <!-- ── System metrics ── -->
-  <div class="grid-3 mt-4">
-    <div class="card stat">
+  <div class="grid-stat mt-4">
+    <div class="card card--static stat-tile">
       <div class="stat-label">CPU load (1m)</div>
       <div class="stat-value">{heartbeat.loadavg[0].toFixed(2)}</div>
     </div>
-    <div class="card stat">
+    <div class="card card--static stat-tile">
       <div class="stat-label">Memory used</div>
       <div class="stat-value">{formatBytes(heartbeat.memory.used)}<span class="stat-sub"> / {formatBytes(heartbeat.memory.total)}</span></div>
     </div>
-    <div class="card stat">
+    <div class="card card--static stat-tile">
       <div class="stat-label">Uptime</div>
       <div class="stat-value">{Math.floor(heartbeat.uptimeSeconds / 3600)}h {Math.floor((heartbeat.uptimeSeconds % 3600) / 60)}m</div>
     </div>
-    <div class="card stat">
-      <div class="stat-label">Platform</div>
-      <div class="stat-value text-sm">{heartbeat.platform} / {heartbeat.arch}</div>
+    <div class="card card--static stat-tile">
+      <div class="stat-label">OS</div>
+      <div class="stat-value text-sm">{formatMachineOs(d1Machine, heartbeat)}</div>
     </div>
-    <div class="card stat">
+    <div class="card card--static stat-tile">
       <div class="stat-label">CPU cores</div>
       <div class="stat-value">{heartbeat.cpuCount}</div>
     </div>
-    <div class="card stat">
+    <div class="card card--static stat-tile">
       <div class="stat-label">Last seen</div>
       <div class="stat-value text-sm">{timeAgo(heartbeat.receivedAt)}</div>
     </div>
@@ -219,7 +242,7 @@
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-2">
       <span class="relay-dot" class:connected={relayConnected} />
-      <span class="text-sm" style="font-weight:600">Live Agent Stream</span>
+      <span class="relay-title">Live Agent Stream</span>
       {#if agentOnline}
         <span class="badge active">agent online</span>
       {:else}
@@ -241,11 +264,11 @@
 
 <!-- ── Recent sessions ── -->
 <div class="mt-6">
-  <h2 class="mb-4">Recent Sessions</h2>
+  <h2 class="section-title mb-4">Recent Sessions</h2>
   {#if sessions.length === 0}
-    <div class="card empty-state">No sessions recorded for this machine yet.</div>
+    <div class="card card--static empty-state">No sessions recorded for this machine yet.</div>
   {:else}
-    <div class="card table-card">
+    <div class="card card--static table-card">
       <table>
         <thead>
           <tr>
@@ -255,7 +278,7 @@
         <tbody>
           {#each sessions as s (s.session_id)}
             <tr>
-              <td><code class="text-muted">{s.session_id.slice(0,8)}…</code></td>
+              <td><code class="text-muted font-mono">{s.session_id.slice(0,8)}…</code></td>
               <td class="text-muted">{s.model || '—'}</td>
               <td><span class="badge {s.status === 'active' ? 'active' : 'offline'}">{s.status}</span></td>
               <td>{s.message_count}</td>
@@ -278,11 +301,11 @@
         Permanently remove <strong>{heartbeat?.hostname ?? machineId}</strong> and all its sessions, usage data, and heartbeat? This cannot be undone.
       </p>
       {#if deleteError}
-        <div class="error-banner card mt-2">{deleteError}</div>
+        <div class="error-banner mt-2" role="alert">{deleteError}</div>
       {/if}
       <div class="modal-actions mt-4">
-        <button class="btn btn-ghost" on:click={closeDeleteModal} disabled={deleting}>Cancel</button>
-        <button class="btn btn-danger" on:click={confirmDelete} disabled={deleting}>
+        <button type="button" class="btn btn-ghost" on:click={closeDeleteModal} disabled={deleting}>Cancel</button>
+        <button type="button" class="btn btn-danger-solid" on:click={confirmDelete} disabled={deleting}>
           {deleting ? 'Removing…' : 'Remove machine'}
         </button>
       </div>
@@ -291,51 +314,10 @@
 {/if}
 
 <style>
-  h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
-  h2 { font-size: 1rem; font-weight: 600; }
   .back { display: inline-block; }
-
-  .grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.75rem; }
-  .stat { padding: 1rem; }
-  .stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-  .stat-value { font-size: 1.2rem; font-weight: 700; margin-top: 4px; }
-  .stat-sub { font-size: 0.75rem; font-weight: 400; color: var(--text-muted); }
-
-  .relay-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--text-muted);
-    transition: background 0.3s;
+  .banner-row-text {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.45;
   }
-  .relay-dot.connected { background: var(--green); animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
-
-  .relay-log {
-    background: rgba(0,0,0,0.3);
-    border-radius: 8px;
-    padding: 12px;
-    max-height: 320px;
-    overflow-y: auto;
-    font-family: 'SF Mono', 'Cascadia Code', monospace;
-    font-size: 0.78rem;
-    line-height: 1.6;
-  }
-  .relay-line { color: var(--text-muted); white-space: pre-wrap; word-break: break-word; }
-  .relay-line:first-child { color: var(--text); }
-
-  .table-card { padding: 0; overflow: hidden; }
-  code { font-family: 'SF Mono', monospace; }
-  .error-banner { background: var(--red-dim); border-color: var(--red); color: var(--red); margin-bottom: 1rem; }
-  .relay-warn { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
-  .empty-state { color: var(--text-muted); text-align: center; padding: 2rem; }
-
-  .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
-  .btn-danger:hover { opacity: 0.85; }
-  .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-sm { font-size: 0.78rem; padding: 4px 10px; }
-  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .modal-card { max-width: 440px; width: 90%; }
-  .modal-card h3 { font-size: 1.05rem; font-weight: 600; }
-  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
-  .btn-ghost { background: transparent; border-color: var(--border); color: var(--text-muted); }
-  .btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text); }
 </style>

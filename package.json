@@ -22,7 +22,8 @@
     "trace:websocket": "node scripts/websocket-event-trace.mjs",
     "observability:report": "node scripts/observability-report.mjs",
     "validate": "node scripts/validate-setup.mjs",
-    "e2e": "node scripts/browser-e2e.mjs"
+    "e2e": "node scripts/browser-e2e.mjs",
+    "bootstrap:upload": "node scripts/secrets-encrypt-upload.mjs"
   },
   "dependencies": {
     "playwright": "^1.53.0"

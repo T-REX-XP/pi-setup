@@ -3,7 +3,16 @@
 // Run: npx vitest run
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiError, WorkerApiError, userMessage, withRetry, fetchHeartbeats, deleteMachine } from './api';
+import {
+  ApiError,
+  WorkerApiError,
+  userMessage,
+  withRetry,
+  fetchHeartbeats,
+  deleteMachine,
+  formatMachineOs,
+  osDisplayName,
+} from './api';
 
 // ─── ApiError ────────────────────────────────────────────────────────────────
 
@@ -447,5 +456,29 @@ describe('deleteMachine', () => {
       `https://worker.example.com/v1/machines/${encodeURIComponent(machineId)}`,
       expect.objectContaining({ method: 'DELETE' }),
     );
+  });
+});
+
+describe('osDisplayName / formatMachineOs', () => {
+  it('maps Node platform to friendly labels', () => {
+    expect(osDisplayName('darwin')).toBe('macOS');
+    expect(osDisplayName('win32')).toBe('Windows');
+    expect(osDisplayName('linux')).toBe('Linux');
+  });
+
+  it('joins enrollment fields with separators', () => {
+    expect(
+      formatMachineOs({ platform: 'darwin', arch: 'arm64', os_release: '23.4.0' }, null),
+    ).toBe('macOS · 23.4.0 · arm64');
+  });
+
+  it('uses heartbeat arch when newer than D1 row', () => {
+    expect(
+      formatMachineOs({ platform: 'linux', arch: 'x64', os_release: '6.1' }, { platform: 'linux', arch: 'aarch64' }),
+    ).toBe('Linux · 6.1 · aarch64');
+  });
+
+  it('returns em dash when empty', () => {
+    expect(formatMachineOs(null, null)).toBe('—');
   });
 });

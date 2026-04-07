@@ -5,6 +5,7 @@ export interface Env {
   PI_SETUP_BOOTSTRAP_TOKEN: string;
   PI_SETUP_ENROLLMENT_SIGNING_KEY: string;
   PI_SETUP_ALLOWED_ORIGIN?: string;
+  PI_SETUP_REPO_URL?: string;
 }
 
 type SecretRecord = {
@@ -83,6 +84,167 @@ type RequestContext = {
 };
 
 const encoder = new TextEncoder();
+
+// ─── Bootstrap script builder ────────────────────────────────────────────────
+function buildBootstrapScript(workerUrl: string, repoUrl: string): string {
+  return `#!/usr/bin/env bash
+# pi-setup headless bootstrap
+# Usage: curl -sL ${workerUrl}/bootstrap.sh | SYNC_PASS=<master-key> SYNC_TOKEN=<bootstrap-token> bash
+#
+# Optional env vars:
+#   REPO_URL=<git-url>          override repo URL (default: ${repoUrl})
+#   INSTALL_DIR=<path>          clone destination (default: ~/pi.dev)
+#   SECRET_NAME=<name>          KV secret to pull   (default: pi-secrets-<hostname>)
+#   SKIP_NVM=1                  skip nvm/node install (node already in PATH)
+
+set -euo pipefail
+
+WORKER_URL="${workerUrl}"
+REPO_URL="\${REPO_URL:-${repoUrl}}"
+INSTALL_DIR="\${INSTALL_DIR:-\$HOME/pi.dev}"
+SYNC_TOKEN="\${SYNC_TOKEN:-\${PI_SETUP_BOOTSTRAP_TOKEN:-}}"
+SYNC_PASS="\${SYNC_PASS:-\${PI_SETUP_MASTER_KEY:-}}"
+_HOSTNAME="\$(hostname | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | sed 's/-\$//')"
+SECRET_NAME="\${SECRET_NAME:-pi-secrets-\$_HOSTNAME}"
+
+_log()  { printf '\\n[bootstrap] %s\\n' "\$*"; }
+_err()  { printf '\\n[bootstrap] ERROR: %s\\n' "\$*" >&2; exit 1; }
+_check(){ command -v "\$1" &>/dev/null || _err "\$1 is required but not found"; }
+
+[[ -z "\$SYNC_TOKEN" ]] && _err "SYNC_TOKEN (bootstrap token) is required."
+[[ -z "\$SYNC_PASS"  ]] && _err "SYNC_PASS (master key / passphrase) is required."
+
+# ── 1. Install Node.js via nvm if needed ──────────────────────────────────
+if [[ "\${SKIP_NVM:-0}" != "1" ]] && ! command -v node &>/dev/null; then
+  _log "Installing nvm + Node.js LTS…"
+  export NVM_DIR="\$HOME/.nvm"
+  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  # shellcheck source=/dev/null
+  source "\$NVM_DIR/nvm.sh"
+  nvm install --lts
+  nvm use --lts
+fi
+
+# Reload nvm if it exists but node is missing from PATH
+export NVM_DIR="\$HOME/.nvm"
+[[ -s "\$NVM_DIR/nvm.sh" ]] && source "\$NVM_DIR/nvm.sh"
+
+_check node
+_check git
+
+# ── 2. Clone or update the repo ───────────────────────────────────────────
+_log "Setting up repo at \$INSTALL_DIR…"
+if [[ -d "\$INSTALL_DIR/.git" ]]; then
+  _log "Repo already cloned — pulling latest…"
+  git -C "\$INSTALL_DIR" pull --ff-only
+else
+  git clone "\$REPO_URL" "\$INSTALL_DIR"
+fi
+cd "\$INSTALL_DIR"
+
+# ── 3. Install repo deps ───────────────────────────────────────────────────
+_log "Installing dependencies…"
+if command -v bun &>/dev/null && [[ -f bun.lock ]]; then
+  bun install --frozen-lockfile 2>/dev/null || bun install
+else
+  npm install --loglevel=warn
+fi
+
+# ── 4. Pull and decrypt credentials from KV ───────────────────────────────
+_log "Fetching encrypted secret '\$SECRET_NAME' from KV…"
+_REQ_ID="\$(node -e "process.stdout.write(crypto.randomUUID())" 2>/dev/null || echo \"bootstrap-\$(date +%s)\")"
+_SECRET_JSON="\$(curl -fsSL \\
+  -H "authorization: Bearer \$SYNC_TOKEN" \\
+  -H "x-request-id: \$_REQ_ID" \\
+  "\$WORKER_URL/v1/secrets/\$(node -e "process.stdout.write(encodeURIComponent(process.argv[1]))" "\$SECRET_NAME")"\
+)"
+
+_log "Decrypting secret…"
+node - <<'NODEEOF'
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const passphrase = process.env.SYNC_PASS;
+const raw = JSON.parse(process.env._SECRET_JSON || '{}');
+const sec = raw.secret;
+if (!sec) { console.error('[bootstrap] No secret in response:', JSON.stringify(raw)); process.exit(1); }
+
+const key = crypto.createHash('sha256').update(passphrase).digest();
+const iv  = Buffer.from(sec.iv,         'base64');
+const tag = Buffer.from(sec.tag,        'base64');
+const ct  = Buffer.from(sec.ciphertext, 'base64');
+
+const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
+d.setAuthTag(tag);
+const plaintext = Buffer.concat([d.update(ct), d.final()]).toString('utf8');
+
+const out = '.env.runtime';
+fs.writeFileSync(out, plaintext, 'utf8');
+console.log('[bootstrap] Wrote decrypted credentials to ' + out);
+NODEEOF
+
+export _SECRET_JSON="\$_SECRET_JSON"
+
+# ── 5. Set up bin/pi wrapper ───────────────────────────────────────────────
+chmod +x bin/pi
+if command -v tmux &>/dev/null; then
+  _log "tmux found — pi sessions will be auto-wrapped."
+else
+  _log "tmux not found. Install it for session wrapping:"
+  _log "  sudo apt install tmux   /  sudo dnf install tmux"
+fi
+
+# ── 6. Write sync.json with workerUrl ─────────────────────────────────────
+node -e "
+const fs=require('fs');
+const s=fs.existsSync('sync.json')?JSON.parse(fs.readFileSync('sync.json','utf8')):{};
+s.workerUrl=process.env.WORKER_URL;
+fs.writeFileSync('sync.json',JSON.stringify(s,null,2)+'\\n','utf8');
+"
+
+# ── 7. Add bin/ to PATH in shell profile ──────────────────────────────────
+BIN_DIR="\$(pwd)/bin"
+PROFILE="\$HOME/.bashrc"
+[[ -n "\${ZSH_VERSION:-}" ]] && PROFILE="\$HOME/.zshrc"
+
+BLOCK='# >>> pi-tmux-wrapper >>>'
+if ! grep -q "\$BLOCK" "\$PROFILE" 2>/dev/null; then
+  printf '\\n# >>> pi-tmux-wrapper >>>\\n' >> "\$PROFILE"
+  printf 'export PATH="%s:\$PATH"\\n' "\$BIN_DIR" >> "\$PROFILE"
+  printf 'export PI_REAL_PI="%s"\\n' "\$(command -v pi 2>/dev/null || echo '')" >> "\$PROFILE"
+  printf '# <<< pi-tmux-wrapper <<<\\n' >> "\$PROFILE"
+fi
+
+# ── 8. Start the fleet daemon ─────────────────────────────────────────────
+_log "Starting fleet daemon…"
+
+if command -v systemctl &>/dev/null && [[ -d /etc/systemd/user ]]; then
+  _log "Installing systemd user service…"
+  mkdir -p "\$HOME/.config/systemd/user"
+  sed "s|ExecStart=.*|ExecStart=node \$(pwd)/scripts/fleet-daemon.mjs|" \\
+    services/systemd/pi-setup-fleet.service > "\$HOME/.config/systemd/user/pi-setup-fleet.service"
+  systemctl --user daemon-reload
+  systemctl --user enable --now pi-setup-fleet.service
+  _log "Daemon running via systemd. Check: systemctl --user status pi-setup-fleet"
+else
+  _log "Starting daemon in background (nohup)…"
+  nohup node scripts/fleet-daemon.mjs >> .pi/runtime/daemon.log 2>&1 &
+  _log "Daemon PID \$! — logs: .pi/runtime/daemon.log"
+fi
+
+printf '\\n'
+printf '\\033[32m╔══════════════════════════════════════════════════╗\\033[0m\\n'
+printf '\\033[32m║  Bootstrap complete!                             ║\\033[0m\\n'
+printf '\\033[32m╠══════════════════════════════════════════════════╣\\033[0m\\n'
+printf '\\033[32m║  Credentials: .env.runtime                       ║\\033[0m\\n'
+printf '\\033[32m║  Daemon:      npm run daemon                     ║\\033[0m\\n'
+printf '\\033[32m║  Reload PATH: source %s\\033[0m\\n' "\$PROFILE"
+printf '\\033[32m╚══════════════════════════════════════════════════╝\\033[0m\\n'
+printf '\\n'
+`;
+}
 const decoder = new TextDecoder();
 const MAX_TRACE_LIST_LIMIT = 100;
 
@@ -374,6 +536,21 @@ export default {
     try {
       const auth = request.headers.get('authorization');
 
+      // ── Bootstrap script (headless VPS install, public endpoint) ────────
+      if (request.method === 'GET' && url.pathname === '/bootstrap.sh') {
+        const workerBase = `${url.protocol}//${url.host}`;
+        const repoUrl = (env.PI_SETUP_REPO_URL ?? '').trim() || 'https://github.com/your-org/pi.dev';
+        const script = buildBootstrapScript(workerBase, repoUrl);
+        return new Response(script, {
+          status: 200,
+          headers: {
+            'content-type': 'text/x-shellscript; charset=utf-8',
+            'cache-control': 'no-store',
+            'x-request-id': ctx.requestId,
+          },
+        });
+      }
+
       if (request.method === 'POST' && url.pathname === '/v1/enrollment-tokens/issue') {
         const admin = await requireAdmin(request, env, ctx);
         if (!admin.ok) return admin.response;
@@ -449,10 +626,24 @@ export default {
           const hostname =
             typeof meta.hostname === 'string' && meta.hostname.trim() ? meta.hostname.trim() : payload.machineId;
           const enrolledAt = new Date().toISOString();
+          const osRelease =
+            typeof meta.osRelease === 'string'
+              ? meta.osRelease
+              : typeof meta.os_release === 'string'
+                ? meta.os_release
+                : null;
+          const enrolledFrom =
+            typeof meta.enrolledFrom === 'string'
+              ? meta.enrolledFrom
+              : typeof meta.enrolled_from === 'string'
+                ? meta.enrolled_from
+                : null;
           await upsertMachine(env.PI_DB, payload.machineId, {
             hostname,
             platform: typeof meta.platform === 'string' ? meta.platform : null,
             arch: typeof meta.arch === 'string' ? meta.arch : null,
+            os_release: osRelease,
+            enrolled_from: enrolledFrom,
             enrolled_at: enrolledAt,
             last_seen_at: enrolledAt,
             status: 'enrolled',

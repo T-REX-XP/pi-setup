@@ -130,8 +130,10 @@ async function pushHeartbeat(currentSnapshot) {
 async function refreshState() {
   const currentSnapshot = await snapshot();
   const heartbeat = await pushHeartbeat(currentSnapshot);
+  const tmuxSessions = await scanTmuxSessions();
   return {
     ...currentSnapshot,
+    tmuxSessions,
     heartbeat,
     diagnostics: {
       daemonPort: port,
@@ -212,6 +214,33 @@ async function scanPiSessions(cwd) {
         startedAt: f.split('_')[0].replace(/-/g, (m, i) => i < 10 ? '-' : (i === 10 ? 'T' : (i === 13 || i === 16 ? ':' : '.'))).replace(/-(\d{3})Z/, '.$1Z'),
       }));
   } catch {
+    return [];
+  }
+}
+
+// ─── Tmux session discovery ─────────────────────────────────────────────────
+async function scanTmuxSessions() {
+  try {
+    const { stdout } = await execFileAsync('tmux', [
+      'ls',
+      '-F',
+      '#{session_name}|#{session_created}|#{session_attached}|#{session_windows}',
+    ]);
+    const sessions = [];
+    for (const line of stdout.trim().split('\n')) {
+      if (!line) continue;
+      const [name, createdEpoch, attached, windows] = line.split('|');
+      if (!name || !name.startsWith('pi-')) continue;
+      sessions.push({
+        name,
+        createdAt: new Date(Number(createdEpoch) * 1000).toISOString(),
+        attached: attached === '1',
+        windows: Number(windows) || 1,
+      });
+    }
+    return sessions;
+  } catch {
+    // tmux not running or not installed — not an error
     return [];
   }
 }

@@ -40,9 +40,24 @@
     color: var(--text); letter-spacing: -0.01em;
   }
   .logo:hover { text-decoration: none; }
-  .nav-links { display: flex; gap: 1.5rem; }
-  .nav-links a { color: var(--text-muted); font-size: 0.9rem; transition: color 0.15s; }
-  .nav-links a:hover { color: var(--text); text-decoration: none; }
-  .nav-links a.active { color: var(--accent); }
-  main { padding: 2rem 1rem; }
+  .nav-links { display: flex; align-items: center; gap: 0.35rem; }
+  .nav-links a {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .nav-links a:hover { color: var(--text); text-decoration: none; background: rgba(255, 255, 255, 0.05); }
+  .nav-links a.active {
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid var(--accent-border);
+  }
+  .nav-links a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  main { padding: 2rem 1rem 3rem; }
 </style>

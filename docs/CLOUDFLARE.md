@@ -187,10 +187,18 @@ Issue a short-lived signed enrollment JWT for a new machine.
 Redeem a one-time enrollment token, register the machine, and obtain a short-lived bootstrap JWT
 that can be used to pull the credential blob.
 
-**Request body** (optional metadata merged into the enrollment record)
+**Request body** (optional metadata merged into the enrollment record and stored on the D1 `machines` row)
 ```jsonc
-{ "hostname": "mac-mini-01", "platform": "darwin" }
+{
+  "hostname": "MacBook-Pro.local",
+  "platform": "darwin",
+  "arch": "arm64",
+  "osRelease": "23.4.0",
+  "enrolledFrom": "scripts/pi-enroll.mjs"
+}
 ```
+
+`osRelease` is typically `os.release()` (kernel version). `enrolledFrom` is a short client id string.
 
 **Response `200`**
 ```jsonc

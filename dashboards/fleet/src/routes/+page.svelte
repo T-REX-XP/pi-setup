@@ -2,10 +2,11 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     fetchHeartbeats, fetchMachines, deleteMachine, withRetry,
-    machineStatus, timeAgo, formatBytes, userMessage,
+    machineStatus, timeAgo, formatBytes, userMessage, formatMachineOs,
     ApiError,
     type FleetHeartbeat, type Machine,
   } from '$lib/api';
+  import PlatformIcon from '$lib/PlatformIcon.svelte';
 
   export let params: Record<string, string> = {};
 
@@ -113,6 +114,8 @@
           hostname: h.hostname,
           platform: h.platform,
           arch: h.arch,
+          os_release: null,
+          enrolled_from: null,
           enrolled_at: null,
           last_seen_at: h.receivedAt,
           status: machineStatus(h),
@@ -124,6 +127,8 @@
           hostname: h.hostname,
           platform: h.platform,
           arch: h.arch,
+          os_release: null,
+          enrolled_from: null,
           enrolled_at: null,
           last_seen_at: h.receivedAt,
           status: machineStatus(h),
@@ -157,7 +162,7 @@
 
 {#if !configured}
   <!-- ── Config panel ── -->
-  <div class="setup-panel card">
+  <div class="setup-panel card card--static">
     <h2>Connect to your Worker</h2>
     <p class="text-muted mt-1">Enter your Cloudflare Worker URL and admin token to view your fleet.</p>
     <div class="form mt-4">
@@ -169,40 +174,50 @@
         Admin token
         <input type="password" bind:value={token} placeholder="Bearer token (PI_SETUP_BOOTSTRAP_TOKEN)" />
       </label>
-      <button class="btn" on:click={saveConfig}>Connect</button>
+      <button type="button" class="btn" on:click={saveConfig}>Connect</button>
     </div>
   </div>
 {:else}
   <!-- ── Fleet overview ── -->
   <div class="flex items-center justify-between mb-4">
     <div>
-      <h1>Fleet</h1>
+      <h1 class="page-title">Fleet</h1>
       <p class="text-muted text-sm mt-1">
         {machines.length} machine{machines.length !== 1 ? 's' : ''} ·
-        <span class="online-text">{onlineCount} online</span>
-        {#if staleCount} · <span class="stale-text">{staleCount} stale</span>{/if}
-        {#if offlineCount} · <span class="offline-text">{offlineCount} offline</span>{/if}
+        <span class="stat-online">{onlineCount} online</span>
+        {#if staleCount} · <span class="stat-stale">{staleCount} stale</span>{/if}
+        {#if offlineCount} · <span class="stat-offline">{offlineCount} offline</span>{/if}
       </p>
     </div>
     <div class="flex gap-2 items-center">
-      {#if loading}<span class="spinner" />{/if}
-      <button class="btn" on:click={load}>↻ Refresh</button>
-      <button class="btn btn-ghost" on:click={() => { configured = false; }}>⚙ Config</button>
+      {#if loading}<span class="spinner" aria-hidden="true" />{/if}
+      <button type="button" class="btn" on:click={load}>
+        <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+        Refresh
+      </button>
+      <button type="button" class="btn btn-ghost" on:click={() => { configured = false; }}>
+        <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        </svg>
+        Config
+      </button>
     </div>
   </div>
 
   {#if error}
-    <div class="error-banner card">{error}</div>
+    <div class="error-banner" role="alert">{error}</div>
   {/if}
 
   {#if loading && machines.length === 0}
-    <div class="loading-placeholder">
+    <div class="grid-auto">
       {#each Array(3) as _}
-        <div class="card skeleton" />
+        <div class="card card--static skeleton" aria-hidden="true" />
       {/each}
     </div>
   {:else if machines.length === 0}
-    <div class="card empty-state">
+    <div class="card card--static empty-state">
       <p>No machines yet. Make sure the fleet daemon is running on your machines.</p>
     </div>
   {:else}
@@ -210,39 +225,44 @@
       {#each machines as machine (machine.machine_id)}
         {@const hb = heartbeatMap[machine.machine_id]}
         {@const status = statusOf(machine)}
-        <a href="/machine/{encodeURIComponent(machine.machine_id)}" class="card machine-card">
-          <div class="flex items-center justify-between">
-            <span class="hostname">{machine.hostname}</span>
-            <span class="badge {status}">{status}</span>
-          </div>
-          <div class="meta-row mt-2">
-            <span class="text-muted text-sm">{machine.platform} / {machine.arch}</span>
-            <span class="text-muted text-sm">last seen {timeAgo(hb?.receivedAt ?? machine.last_seen_at)}</span>
-          </div>
-          {#if hb}
-            <div class="metrics mt-2">
-              <div class="metric">
-                <span class="metric-label">CPU</span>
-                <span>{hb.loadavg[0].toFixed(2)}</span>
+        <article class="card machine-card">
+          <a href="/machine/{encodeURIComponent(machine.machine_id)}" class="machine-card-body">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <PlatformIcon platform={hb?.platform ?? machine.platform} size={28} />
+                <span class="hostname truncate">{machine.hostname}</span>
               </div>
-              <div class="metric">
-                <span class="metric-label">RAM</span>
-                <span>{formatBytes(hb.memory.used)} / {formatBytes(hb.memory.total)}</span>
-              </div>
-              <div class="metric">
-                <span class="metric-label">Cores</span>
-                <span>{hb.cpuCount}</span>
-              </div>
-              <div class="metric">
-                <span class="metric-label">Uptime</span>
-                <span>{Math.floor(hb.uptimeSeconds / 3600)}h</span>
-              </div>
+              <span class="badge {status} flex-shrink-0">{status}</span>
             </div>
-          {/if}
-          <div class="card-actions mt-2">
-            <button class="btn btn-danger btn-sm" on:click={(e) => openDeleteModal(machine, e)}>Remove</button>
-          </div>
-        </a>
+            <div class="meta-row mt-2">
+              <span class="text-muted text-sm">{formatMachineOs(machine, hb)}</span>
+              <span class="text-muted text-sm">last seen {timeAgo(hb?.receivedAt ?? machine.last_seen_at)}</span>
+            </div>
+            {#if hb}
+              <div class="metrics mt-2">
+                <div class="metric">
+                  <span class="metric-label">CPU</span>
+                  <span>{hb.loadavg[0].toFixed(2)}</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">RAM</span>
+                  <span>{formatBytes(hb.memory.used)} / {formatBytes(hb.memory.total)}</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Cores</span>
+                  <span>{hb.cpuCount}</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">Uptime</span>
+                  <span>{Math.floor(hb.uptimeSeconds / 3600)}h</span>
+                </div>
+              </div>
+            {/if}
+          </a>
+          <footer class="machine-card-footer">
+            <button type="button" class="btn btn-danger btn-sm" on:click={(e) => openDeleteModal(machine, e)}>Remove</button>
+          </footer>
+        </article>
       {/each}
     </div>
   {/if}
@@ -257,11 +277,11 @@
           Permanently remove <strong>{deleteTarget.hostname}</strong> and all its sessions, usage data, and heartbeat? This cannot be undone.
         </p>
         {#if deleteError}
-          <div class="error-banner card mt-2">{deleteError}</div>
+          <div class="error-banner mt-2" role="alert">{deleteError}</div>
         {/if}
         <div class="modal-actions mt-4">
-          <button class="btn btn-ghost" on:click={closeDeleteModal} disabled={deleting}>Cancel</button>
-          <button class="btn btn-danger" on:click={confirmDelete} disabled={deleting}>
+          <button type="button" class="btn btn-ghost" on:click={closeDeleteModal} disabled={deleting}>Cancel</button>
+          <button type="button" class="btn btn-danger-solid" on:click={confirmDelete} disabled={deleting}>
             {deleting ? 'Removing…' : 'Remove machine'}
           </button>
         </div>
@@ -269,47 +289,3 @@
     </div>
   {/if}
 {/if}
-
-<style>
-  h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
-
-  .setup-panel { max-width: 520px; margin: 4rem auto; }
-  .setup-panel h2 { font-size: 1.1rem; font-weight: 600; }
-  .form { display: flex; flex-direction: column; gap: 1rem; }
-  .form label { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--text-muted); }
-
-  .machine-card { display: block; text-decoration: none !important; color: var(--text); cursor: pointer; }
-  .machine-card:hover { text-decoration: none; }
-  .hostname { font-weight: 600; font-size: 0.95rem; }
-
-  .meta-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; }
-
-  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .metric { display: flex; flex-direction: column; gap: 1px; }
-  .metric-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-
-  .online-text  { color: var(--green); }
-  .stale-text   { color: var(--amber); }
-  .offline-text { color: var(--red); }
-
-  .error-banner { background: var(--red-dim); border-color: var(--red); color: var(--red); margin-bottom: 1rem; }
-
-  .loading-placeholder { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px,1fr)); gap: 1rem; }
-  .skeleton { height: 140px; background: var(--bg-card); animation: shimmer 1.5s infinite; }
-  @keyframes shimmer { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-
-  .empty-state { color: var(--text-muted); text-align: center; padding: 3rem; }
-
-  .btn-ghost { background: transparent; border-color: var(--border); color: var(--text-muted); }
-  .btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text); }
-
-  .card-actions { display: flex; justify-content: flex-end; }
-  .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
-  .btn-danger:hover { opacity: 0.85; }
-  .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-sm { font-size: 0.78rem; padding: 4px 10px; }
-  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .modal-card { max-width: 440px; width: 90%; }
-  .modal-card h3 { font-size: 1.05rem; font-weight: 600; }
-  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
-</style>
