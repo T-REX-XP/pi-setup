@@ -218,8 +218,12 @@ describe('withRetry', () => {
 describe('apiGet error classification', () => {
   // apiGet is not exported; we test it indirectly through the exported fetch wrappers.
   // We mock localStorage and fetch to isolate each error scenario.
+  // Use fake timers so apiGet's abort-timeout setTimeout is always defined, even
+  // when running after the withRetry describe block whose vi.useRealTimers() call
+  // does not reliably restore globalThis.setTimeout in vitest 2.x.
 
   beforeEach(() => {
+    vi.useFakeTimers();
     // Stub localStorage
     vi.stubGlobal('localStorage', {
       getItem: (key: string) =>
@@ -227,7 +231,7 @@ describe('apiGet error classification', () => {
     });
   });
 
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
   it('throws ApiError(kind=network) when fetch rejects', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
@@ -328,6 +332,7 @@ describe('apiGet error classification', () => {
 
 describe('deleteMachine', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) =>
         key === 'pi_worker_url' ? 'https://worker.example.com/' : 'tok-secret',
