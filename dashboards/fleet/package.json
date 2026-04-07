@@ -6,6 +6,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy:cloudflare": "vite build && wrangler pages deploy .svelte-kit/cloudflare --project-name=pi-fleet-dashboard",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
   },
@@ -16,7 +17,8 @@
     "svelte": "^4.0.0",
     "svelte-check": "^3.0.0",
     "typescript": "^5.0.0",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "wrangler": "^4.80.0"
   },
   "type": "module"
 }

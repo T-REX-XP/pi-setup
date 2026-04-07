@@ -1,5 +1,7 @@
 # Cloudflare Infrastructure
 
+> **New to deployment?** Follow [`SETUP.md`](SETUP.md) first (API Worker, D1, secrets, fleet dashboard locally or on Cloudflare Pages, and `npm run init`).
+
 This document is the single authoritative reference for the `pi.dev` Cloudflare backend.
 It covers the Worker API, D1 database schema, Durable Object WebSocket relay, KV storage layout,
 authentication model, and deployment procedures.
@@ -516,9 +518,10 @@ wrangler kv namespace create PI_SETUP_SECRETS
 wrangler d1 create pi-setup-db
 # → paste the returned database_id into wrangler.toml d1_databases[].database_id
 
-# Apply schema
-wrangler d1 execute pi-setup-db --file=cloudflare/worker/schema.sql
+# Apply schema to the *remote* D1 database (use --remote for hosted DB)
+wrangler d1 execute pi-setup-db --file=schema.sql --remote
 ```
+(Run these commands from `cloudflare/worker`, or pass `--file=cloudflare/worker/schema.sql` from the repo root.)
 
 ### 2. Set secrets
 
@@ -583,6 +586,7 @@ All errors follow a consistent shape:
 
 | Document | Content |
 |----------|---------|
+| [`docs/SETUP.md`](SETUP.md) | Step-by-step setup, dashboard (local + Cloudflare Pages), `npm run init` |
 | [`docs/SECRETS.md`](SECRETS.md) | Step-by-step secret upload, pull, and machine enrolment workflow |
 | [`docs/FLEET.md`](FLEET.md) | Fleet daemon configuration, `fleetctl` usage, and dashboard |
 | [`README.md`](../README.md) | Quick-start, workflow commands, and full system overview |

@@ -12,6 +12,7 @@
     "cloudflare"
   ],
   "scripts": {
+    "init": "node scripts/pi-init.mjs",
     "install:hooks": "bash scripts/install-hooks.sh",
     "bump": "node scripts/bump-version.mjs",
     "daemon": "node scripts/fleet-daemon.mjs",

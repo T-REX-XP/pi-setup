@@ -1,6 +1,6 @@
 # Cloudflare Worker + KV Secret Flow
 
-> For the full Worker API reference, D1 schema, Durable Objects, and deployment guide see [`docs/CLOUDFLARE.md`](CLOUDFLARE.md).
+> **Provisioning and deploy:** see [`docs/SETUP.md`](SETUP.md). For the full Worker API reference, D1 schema, Durable Objects, and deployment details see [`docs/CLOUDFLARE.md`](CLOUDFLARE.md).
 
 ## Goal
 Store encrypted credential blobs in Cloudflare KV and pull them onto new or existing machines without a browser.

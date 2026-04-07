@@ -1,21 +1,29 @@
-# Fleet Daemon
+# Fleet daemon & dashboard
 
-> For the Worker-side fleet API endpoints (`/v1/fleet/*`, `/v1/relay/*`, `/v1/diagnostics`) see [`docs/CLOUDFLARE.md`](CLOUDFLARE.md).
+> **Setup:** [`SETUP.md`](SETUP.md) covers the fleet dashboard (run **locally** or on **Cloudflare Pages**), daemon env vars, and `npm run init`.
 
-## Start locally
+For Worker endpoints (`/v1/fleet/*`, `/v1/relay/*`, `/v1/diagnostics`) see [`CLOUDFLARE.md`](CLOUDFLARE.md).
+
+---
+
+## Fleet daemon
+
+### Start locally
+
 ```bash
 node scripts/fleet-daemon.mjs
 ```
 
-## Query
+### Query
+
 ```bash
 node scripts/fleetctl.mjs status
 node scripts/fleetctl.mjs health
 node scripts/fleetctl.mjs diagnostics
 ```
 
-## Push heartbeats to the Worker
-Set these environment variables before starting the daemon:
+### Push heartbeats to the Worker
+
 ```bash
 export PI_SETUP_WORKER_URL=https://<worker-url>
 export PI_SETUP_BOOTSTRAP_TOKEN=...
@@ -24,24 +32,24 @@ export PI_SETUP_MACHINE_ID=$(hostname)
 export PI_SETUP_HEARTBEAT_INTERVAL_MS=15000
 ```
 
-When configured, the daemon posts snapshots to `POST /v1/fleet/heartbeat` and stores the latest sync result in local metrics under `heartbeat`.
+When configured, the daemon posts to `POST /v1/fleet/heartbeat` and stores the latest sync result in local metrics under `heartbeat`.
 
-Each daemon request and remote heartbeat push carries an `x-request-id` correlation ID. The daemon and Worker emit structured JSON logs including that request ID so operators can trace a heartbeat end-to-end.
+Each request carries an `x-request-id` for tracing.
 
-## Centralized dashboard data
-Fetch aggregated machine heartbeats from the Worker:
+---
+
+## Centralized data (curl)
+
 ```bash
 curl -H "authorization: Bearer $PI_SETUP_BOOTSTRAP_TOKEN" \
   "$PI_SETUP_WORKER_URL/v1/fleet/heartbeats"
-```
 
-Fetch operator-facing diagnostics from the Worker:
-```bash
 curl -H "authorization: Bearer $PI_SETUP_BOOTSTRAP_TOKEN" \
   "$PI_SETUP_WORKER_URL/v1/diagnostics"
 ```
 
-Record and inspect websocket trace events:
+Websocket trace helper:
+
 ```bash
 PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... \
 node scripts/websocket-event-trace.mjs machine-01 connected system ok conn-1
@@ -50,16 +58,51 @@ curl -H "authorization: Bearer $PI_SETUP_BOOTSTRAP_TOKEN" \
   "$PI_SETUP_WORKER_URL/v1/observability/websocket-events?limit=20"
 ```
 
-The bundled `dashboards/fleet/index.html` supports both:
-- local mode via `http://127.0.0.1:4269/metrics`
-- remote mode via `https://<worker>/v1/fleet/heartbeats` with a bearer token entered at runtime
+---
 
-## Service install
+## Fleet dashboard (browser UI)
+
+The UI lives in **`dashboards/fleet`** (SvelteKit). It is **only a client** to the API Worker: you enter the Worker base URL and the bootstrap token in the UI (or rely on `sync.json` / env for scripts).
+
+### Run locally (development)
+
+```bash
+cd dashboards/fleet
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** (or the URL Vite prints).
+
+- **Worker URL** — your `PI_SETUP_WORKER_URL` (deployed `https://…workers.dev`, or `http://localhost:8787` if using `wrangler dev` for the API)
+- **Bearer token** — `PI_SETUP_BOOTSTRAP_TOKEN`
+
+### Run on Cloudflare (production-style)
+
+Build and deploy to **Cloudflare Pages**:
+
+```bash
+cd dashboards/fleet
+npm install
+npm run deploy:cloudflare
+```
+
+First-time: create a Pages project (e.g. `pi-fleet-dashboard`) in the Cloudflare dashboard or with `wrangler pages project create`. Change `--project-name` in `package.json` if you use another name.
+
+After deploy, open the **`*.pages.dev`** URL, then enter the same Worker URL and token as above.
+
+See [`SETUP.md`](SETUP.md) for CORS notes and troubleshooting.
+
+---
+
+## Service install (systemd)
+
 Copy `services/systemd/pi-setup-fleet.service` to your user systemd directory and enable it.
 
-## Dashboard
-Open `dashboards/fleet/index.html` after the daemon is running.
+---
 
 ## See also
-- [`docs/CLOUDFLARE.md`](CLOUDFLARE.md) — Worker API reference, heartbeat schema, WebSocket relay
-- [`docs/SECRETS.md`](SECRETS.md) — credential upload and machine enrollment
+
+- [`docs/SETUP.md`](SETUP.md) — full setup, `npm run init`, dashboard deploy
+- [`docs/CLOUDFLARE.md`](CLOUDFLARE.md) — Worker API, heartbeats, WebSocket relay
+- [`docs/SECRETS.md`](SECRETS.md) — credentials and enrollment
