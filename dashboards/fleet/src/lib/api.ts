@@ -211,6 +211,46 @@ async function apiGet<T>(path: string): Promise<T> {
   }
 }
 
+async function apiDelete<T>(path: string): Promise<T> {
+  const { workerUrl, token } = getConfig();
+  if (!workerUrl) throw new ApiError('Worker URL not configured', 'unknown');
+  const url = `${workerUrl}${path}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (fetchErr) {
+    clearTimeout(timer);
+    if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+      throw new ApiError(`Request to ${workerUrl} timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`, 'timeout');
+    }
+    throw new ApiError(
+      `Could not reach the Worker at ${workerUrl}. Check the URL, your network, and that the Worker allows this origin (CORS).`,
+      'network',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  const requestId = res.headers.get('x-request-id') || undefined;
+  if (res.status === 404) return { ok: true, alreadyDeleted: true, requestId } as unknown as T;
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let parsed: unknown;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+    const fromBody = typeof parsed === 'string' && parsed.trim() ? parsed.slice(0, 200) : messageFromErrorBody(parsed);
+    const base = fromBody || res.statusText || `HTTP ${res.status}`;
+    const kind: ApiErrorKind = res.status === 401 || res.status === 403 ? 'auth' : res.status === 429 || res.status >= 500 ? 'server' : 'unknown';
+    throw new ApiError(base, kind, { status: res.status, requestId });
+  }
+  try { return (await res.json()) as T; }
+  catch { throw new ApiError('Worker returned a response that is not valid JSON.', 'unknown'); }
+}
+
 export async function fetchHeartbeats(): Promise<{ heartbeats: FleetHeartbeat[] }> {
   return apiGet('/v1/fleet/heartbeats');
 }
@@ -227,6 +267,11 @@ export async function fetchSessions(machineId?: string): Promise<{ sessions: Ses
 export async function fetchUsage(machineId?: string): Promise<{ metrics: UsageMetric[] }> {
   const qs = machineId ? `?machineId=${encodeURIComponent(machineId)}` : '';
   return apiGet(`/v1/usage${qs}`);
+}
+
+/** Delete a machine and all its data. 404 is treated as success. Never retried. */
+export async function deleteMachine(machineId: string): Promise<{ ok: boolean }> {
+  return apiDelete(`/v1/machines/${encodeURIComponent(machineId)}`);
 }
 
 export function openRelaySocket(machineId: string, role: 'observer'): WebSocket {

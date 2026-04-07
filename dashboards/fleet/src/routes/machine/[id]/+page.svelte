@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import {
-    fetchHeartbeats, fetchSessions, openRelaySocket, withRetry,
+    fetchHeartbeats, fetchSessions, deleteMachine, openRelaySocket, withRetry,
     machineStatus, timeAgo, formatBytes, userMessage,
     ApiError,
     type FleetHeartbeat, type Session,
@@ -127,6 +128,29 @@
   }
 
   $: status = heartbeat ? machineStatus(heartbeat) as 'online'|'stale'|'offline' : 'offline';
+
+  let showDeleteModal = false;
+  let deleting = false;
+  let deleteError = '';
+
+  function openDeleteModal() { showDeleteModal = true; deleteError = ''; }
+  function closeDeleteModal() { showDeleteModal = false; deleting = false; deleteError = ''; }
+
+  async function confirmDelete() {
+    deleting = true;
+    deleteError = '';
+    try {
+      relayDestroyed = true;
+      if (relayReconnectTimer !== null) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
+      if (ws) { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); ws = null; }
+      await deleteMachine(machineId);
+      goto('/');
+    } catch (e) {
+      relayDestroyed = false;
+      deleteError = userMessage(e);
+      deleting = false;
+    }
+  }
 </script>
 
 <svelte:head><title>pi fleet — {machineId}</title></svelte:head>
@@ -138,7 +162,10 @@
     <h1>{heartbeat?.hostname ?? machineId}</h1>
     <p class="text-muted text-sm mt-1">{machineId}</p>
   </div>
-  <span class="badge {status}">{status}</span>
+  <div class="flex gap-2 items-center">
+    <span class="badge {status}">{status}</span>
+    <button class="btn btn-danger btn-sm" on:click={openDeleteModal}>Remove</button>
+  </div>
 </div>
 
 {#if error}
@@ -237,6 +264,28 @@
   {/if}
 </div>
 
+{#if showDeleteModal}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="modal-backdrop" on:click={closeDeleteModal}>
+    <div class="modal-card card" on:click|stopPropagation>
+      <h3>Remove machine</h3>
+      <p class="text-muted mt-2">
+        Permanently remove <strong>{heartbeat?.hostname ?? machineId}</strong> and all its sessions, usage data, and heartbeat? This cannot be undone.
+      </p>
+      {#if deleteError}
+        <div class="error-banner card mt-2">{deleteError}</div>
+      {/if}
+      <div class="modal-actions mt-4">
+        <button class="btn btn-ghost" on:click={closeDeleteModal} disabled={deleting}>Cancel</button>
+        <button class="btn btn-danger" on:click={confirmDelete} disabled={deleting}>
+          {deleting ? 'Removing…' : 'Remove machine'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
   h2 { font-size: 1rem; font-weight: 600; }
@@ -274,4 +323,15 @@
   .error-banner { background: var(--red-dim); border-color: var(--red); color: var(--red); margin-bottom: 1rem; }
   .relay-warn { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
   .empty-state { color: var(--text-muted); text-align: center; padding: 2rem; }
+
+  .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn-danger:hover { opacity: 0.85; }
+  .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { font-size: 0.78rem; padding: 4px 10px; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-card { max-width: 440px; width: 90%; }
+  .modal-card h3 { font-size: 1.05rem; font-weight: 600; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+  .btn-ghost { background: transparent; border-color: var(--border); color: var(--text-muted); }
+  .btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text); }
 </style>

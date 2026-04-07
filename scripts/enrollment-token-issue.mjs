@@ -25,9 +25,12 @@ const text = await res.text();
 console.log(text);
 if (!res.ok) process.exit(1);
 console.error(`
-Next step (on the machine you are enrolling — issuing a token does not register the node by itself):
-  export PI_SETUP_ENROLLMENT_TOKEN='<paste the "token" JWT from above>'
-  PI_SETUP_WORKER_URL=... PI_SETUP_MASTER_KEY=... node scripts/machine-enroll.mjs .env.runtime
+Simplified: use device-onboard.mjs instead of these manual steps:
 
-After that, run the fleet daemon with PI_SETUP_WORKER_URL + PI_SETUP_BOOTSTRAP_TOKEN so heartbeats appear in the dashboard.
+  node scripts/device-onboard.mjs --issue
+    (prompts for values and prints the ready-to-paste command for the new machine)
+
+Manual next step (on the machine you are enrolling):
+  export PI_SETUP_ENROLLMENT_TOKEN='<paste the "token" JWT from above>'
+  PI_SETUP_WORKER_URL=... PI_SETUP_MASTER_KEY=... node scripts/device-onboard.mjs
 `);

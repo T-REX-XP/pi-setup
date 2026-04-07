@@ -27,37 +27,42 @@ fi
 
 cat <<'EOF'
 
-Setup complete.
+╔══════════════════════════════════════════════════════════════╗
+║  Setup complete!                                             ║
+╚══════════════════════════════════════════════════════════════╝
 
-Next steps:
-1. Read docs/SETUP.md and run `npm run init` for an interactive menu (Worker deploy, D1 schema, dashboard local/Pages, daemon).
-2. Run `pi` in this repo to load the local agents, prompts, skills, and extension.
-3. Configure Cloudflare Worker secrets:
-   - export PI_SETUP_WORKER_URL=...
-   - export PI_SETUP_BOOTSTRAP_TOKEN=...
-   - export PI_SETUP_ENROLLMENT_SIGNING_KEY=...   # worker deploy secret
-   - export PI_SETUP_MASTER_KEY=...
-4. Upload an encrypted secret blob:
-   node scripts/secrets-encrypt-upload.mjs <secret-name> <input-file>
-5. Existing machine sync:
-   node scripts/secrets-sync.mjs <secret-name> [output-file]
-6. New machine enrollment:
-   node scripts/enrollment-token-issue.mjs <machine-id> <secret-name>
-   PI_SETUP_ENROLLMENT_TOKEN=... node scripts/machine-enroll.mjs [output-file]
-7. Start the fleet daemon:
-   node scripts/fleet-daemon.mjs
-   # optional centralized heartbeats:
-   PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... PI_SETUP_MACHINE_ID=$(hostname) node scripts/fleet-daemon.mjs
-8. Validate the repo:
-   node scripts/validate-setup.mjs
+── First-time infrastructure setup (do once) ─────────────────
 
-Workflow commands inside pi:
-- /feature
-- /task
-- /quick
-- /recurse
-- /review
-- /brainstorm /plan /code /test /improve
-- /idea
-- /continue
+  npm run init
+    Interactive menu: deploy Worker, apply D1 schema,
+    run dashboard locally, deploy to Cloudflare Pages.
+
+── Onboard a new machine (two commands total) ─────────────────
+
+  On the ADMIN machine — issue an enrollment token:
+
+    node scripts/device-onboard.mjs --issue
+      (prompts for Worker URL, admin token, master key; prints
+       a single ready-to-paste command for the new device)
+
+  On the NEW machine — paste the printed command:
+
+    PI_SETUP_WORKER_URL='...' \
+    PI_SETUP_ENROLLMENT_TOKEN='...' \
+    PI_SETUP_MASTER_KEY='...' \
+    node scripts/device-onboard.mjs
+      (enrolls the device, decrypts secrets, starts the daemon)
+
+── Pi workflows ───────────────────────────────────────────────
+
+  Run `pi` in this repo to load local agents and extensions.
+  Commands: /feature  /task  /quick  /review  /brainstorm
+
+── Docs ───────────────────────────────────────────────────────
+
+  docs/SETUP.md      — infra overview & step-by-step
+  docs/CLOUDFLARE.md — Worker API & wrangler.toml
+  docs/FLEET.md      — daemon, fleetctl, systemd
+  docs/SECRETS.md    — encrypt, upload, enroll, sync
+
 EOF

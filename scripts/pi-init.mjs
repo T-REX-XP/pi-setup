@@ -78,9 +78,12 @@ const MENU = `
 ║   8   Run fleet daemon (foreground)                              ║
 ║   9   fleetctl status                                            ║
 ║  10   fleetctl diagnostics                                       ║
+║  Device onboarding                                               ║
+║  13   Issue enrollment token for a new machine                   ║
+║  14   Enroll this machine (enroll + start daemon)                ║
 ║  Help                                                            ║
-║  11   Print token generation (openssl)                           ║
-║  12   Print paths to docs                                        ║
+║  15   Print token generation (openssl)                           ║
+║  16   Print paths to docs                                        ║
 ║   0   Exit                                                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 `;
@@ -143,7 +146,13 @@ async function main() {
         run(process.execPath, [path.join(ROOT, 'scripts', 'fleetctl.mjs'), 'diagnostics'], {
           cwd: ROOT,
         });
-      } else if (choice === '11') {
+      } else if (choice === '13') {
+        output.write('\n→ Issue enrollment token for a new machine (--issue mode)…\n');
+        run(process.execPath, [path.join(ROOT, 'scripts', 'device-onboard.mjs'), '--issue'], { cwd: ROOT });
+      } else if (choice === '14') {
+        output.write('\n→ Enroll this machine…\n');
+        run(process.execPath, [path.join(ROOT, 'scripts', 'device-onboard.mjs')], { cwd: ROOT });
+      } else if (choice === '15') {
         output.write(`
 Generate secrets (run in a terminal, then wrangler secret put …):
 
@@ -152,7 +161,7 @@ Generate secrets (run in a terminal, then wrangler secret put …):
 
 Or:  openssl rand -hex 32
 `);
-      } else if (choice === '12') {
+      } else if (choice === '16') {
         output.write(`
   ${path.join(ROOT, 'docs', 'SETUP.md')}     — start here (setup & dashboard)
   ${path.join(ROOT, 'docs', 'CLOUDFLARE.md')} — Worker API & deployment

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
-    fetchHeartbeats, fetchMachines, withRetry,
+    fetchHeartbeats, fetchMachines, deleteMachine, withRetry,
     machineStatus, timeAgo, formatBytes, userMessage,
     ApiError,
     type FleetHeartbeat, type Machine,
@@ -16,6 +16,42 @@
   let token = '';
   let configured = false;
   let interval: ReturnType<typeof setInterval>;
+
+  let deleteTarget: Machine | null = null;
+  let deleting = false;
+  let deleteError = '';
+
+  function openDeleteModal(machine: Machine, e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    deleteTarget = machine;
+    deleteError = '';
+  }
+  function closeDeleteModal() { deleteTarget = null; deleting = false; deleteError = ''; }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    deleting = true;
+    deleteError = '';
+    try {
+      await deleteMachine(deleteTarget.machine_id);
+      const id = deleteTarget.machine_id;
+      machines = machines.filter((m) => m.machine_id !== id);
+      heartbeats = heartbeats.filter((h) => h.machineId !== id);
+      delete heartbeatMap[id];
+      heartbeatMap = heartbeatMap;
+      closeDeleteModal();
+    } catch (e) {
+      if (e instanceof ApiError && e.kind === 'auth') {
+        configured = false;
+        deleteError = 'Authentication failed — please re-enter your credentials.';
+      } else {
+        deleteError = userMessage(e);
+      }
+    } finally {
+      deleting = false;
+    }
+  }
 
   onMount(() => {
     workerUrl = localStorage.getItem('pi_worker_url') || '';
@@ -199,8 +235,33 @@
               </div>
             </div>
           {/if}
+          <div class="card-actions mt-2">
+            <button class="btn btn-danger btn-sm" on:click={(e) => openDeleteModal(machine, e)}>Remove</button>
+          </div>
         </a>
       {/each}
+    </div>
+  {/if}
+
+  {#if deleteTarget}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="modal-backdrop" on:click={closeDeleteModal}>
+      <div class="modal-card card" on:click|stopPropagation>
+        <h3>Remove machine</h3>
+        <p class="text-muted mt-2">
+          Permanently remove <strong>{deleteTarget.hostname}</strong> and all its sessions, usage data, and heartbeat? This cannot be undone.
+        </p>
+        {#if deleteError}
+          <div class="error-banner card mt-2">{deleteError}</div>
+        {/if}
+        <div class="modal-actions mt-4">
+          <button class="btn btn-ghost" on:click={closeDeleteModal} disabled={deleting}>Cancel</button>
+          <button class="btn btn-danger" on:click={confirmDelete} disabled={deleting}>
+            {deleting ? 'Removing…' : 'Remove machine'}
+          </button>
+        </div>
+      </div>
     </div>
   {/if}
 {/if}
@@ -237,4 +298,14 @@
 
   .btn-ghost { background: transparent; border-color: var(--border); color: var(--text-muted); }
   .btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+
+  .card-actions { display: flex; justify-content: flex-end; }
+  .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn-danger:hover { opacity: 0.85; }
+  .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { font-size: 0.78rem; padding: 4px 10px; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-card { max-width: 440px; width: 90%; }
+  .modal-card h3 { font-size: 1.05rem; font-weight: 600; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 </style>

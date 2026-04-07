@@ -91,7 +91,7 @@ function json(data: unknown, status = 200, origin = '*', requestId?: string) {
     'content-type': 'application/json',
     'access-control-allow-origin': origin,
     'access-control-allow-headers': 'authorization, content-type, x-request-id',
-    'access-control-allow-methods': 'GET,POST,OPTIONS'
+    'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS'
   };
   if (requestId) headers['x-request-id'] = requestId;
   return new Response(JSON.stringify(data, null, 2), { status, headers });
@@ -659,6 +659,32 @@ export default {
         if (!env.PI_DB) return response(ctx, { ok: false, error: 'D1 not configured', requestId: ctx.requestId }, 503);
         const rows = await env.PI_DB.prepare('SELECT * FROM machines ORDER BY last_seen_at DESC').all();
         return response(ctx, { ok: true, count: rows.results.length, machines: rows.results, requestId: ctx.requestId }, 200);
+      }
+
+      // ── Delete machine (cascade) ─────────────────────────────────────────
+      if (request.method === 'DELETE' && url.pathname.startsWith('/v1/machines/')) {
+        const admin = await requireAdmin(request, env, ctx);
+        if (!admin.ok) return admin.response;
+
+        const machineId = decodeURIComponent(url.pathname.slice('/v1/machines/'.length));
+        if (!machineId) return response(ctx, { ok: false, error: 'machineId required', requestId: ctx.requestId }, 400);
+
+        if (env.PI_DB) {
+          await env.PI_DB.prepare('DELETE FROM usage_metrics WHERE machine_id = ?').bind(machineId).run();
+          await env.PI_DB.prepare('DELETE FROM sessions WHERE machine_id = ?').bind(machineId).run();
+          const result = await env.PI_DB.prepare('DELETE FROM machines WHERE machine_id = ?').bind(machineId).run();
+          if (result.meta.changes === 0) {
+            return response(ctx, { ok: false, error: 'machine not found', requestId: ctx.requestId }, 404);
+          }
+        }
+
+        await Promise.all([
+          env.PI_SETUP_SECRETS.delete(`fleet:${machineId}`),
+          env.PI_SETUP_SECRETS.delete(`machine:${machineId}`),
+        ]);
+
+        log('info', 'machine.deleted', ctx, { machineId });
+        return response(ctx, { ok: true, machineId, requestId: ctx.requestId }, 200);
       }
 
       return response(ctx, { ok: false, error: 'not found', requestId: ctx.requestId }, 404);
