@@ -78,9 +78,8 @@ const MENU = `
 ║   8   Run fleet daemon (foreground)                              ║
 ║   9   fleetctl status                                            ║
 ║  10   fleetctl diagnostics                                       ║
-║  Device onboarding                                               ║
-║  13   Issue enrollment token for a new machine                   ║
-║  14   Enroll this machine (enroll + start daemon)                ║
+║  Enrollment                                                      ║
+║  13   npm run enroll (admin: issue token | target: one-liner)    ║
 ║  Help                                                            ║
 ║  15   Print token generation (openssl)                           ║
 ║  16   Print paths to docs                                        ║
@@ -147,11 +146,8 @@ async function main() {
           cwd: ROOT,
         });
       } else if (choice === '13') {
-        output.write('\n→ Issue enrollment token for a new machine (--issue mode)…\n');
-        run(process.execPath, [path.join(ROOT, 'scripts', 'device-onboard.mjs'), '--issue'], { cwd: ROOT });
-      } else if (choice === '14') {
-        output.write('\n→ Enroll this machine…\n');
-        run(process.execPath, [path.join(ROOT, 'scripts', 'device-onboard.mjs')], { cwd: ROOT });
+        output.write('\n→ npm run enroll (reads .env.runtime / sync.json)…\n');
+        run(process.execPath, [path.join(ROOT, 'scripts', 'pi-enroll.mjs')], { cwd: ROOT });
       } else if (choice === '15') {
         output.write(`
 Generate secrets (run in a terminal, then wrangler secret put …):
@@ -169,7 +165,7 @@ Or:  openssl rand -hex 32
   ${path.join(ROOT, 'docs', 'SECRETS.md')}    — encrypt / enroll / sync
 `);
       } else {
-        output.write('Unknown option. Try 0–12.\n');
+        output.write('Unknown option. Use 0–11, 13–16.\n');
       }
 
       await rl.question('\nPress Enter to continue…');

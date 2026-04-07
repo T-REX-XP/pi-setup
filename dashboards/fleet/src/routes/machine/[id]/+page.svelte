@@ -140,13 +140,15 @@
     deleting = true;
     deleteError = '';
     try {
+      // Delete first — only tear down relay after confirmed success
+      await deleteMachine(machineId);
+      // Success: prevent relay from reconnecting, then close it
       relayDestroyed = true;
       if (relayReconnectTimer !== null) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
       if (ws) { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); ws = null; }
-      await deleteMachine(machineId);
       goto('/');
     } catch (e) {
-      relayDestroyed = false;
+      // Delete failed — relay is untouched, no recovery needed
       deleteError = userMessage(e);
       deleting = false;
     }

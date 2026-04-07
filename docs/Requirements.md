@@ -24,7 +24,7 @@ REQ-WRAP-004: The wrapper MUST detect subagents or daemon-spawned processes and 
 
 2.3 Bootstrapping
 
-REQ-BOOT-001: The system MUST support one-command installation for interactive environments (git clone && ./install.sh).
+REQ-BOOT-001: The system MUST support minimal bootstrap for interactive environments (git clone, dependency install, optional hooks; no separate install script required).
 
 REQ-BOOT-002: The system MUST support headless bootstrapping via a remote script (curl -sL [URL] | SYNC_PASS=[pwd] SYNC_TOKEN=[token] bash).
 

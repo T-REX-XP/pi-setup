@@ -2,11 +2,17 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { loadPiEnvFileSync, resolvePiEnvFilePath } from './lib/pi-env-file.mjs';
 
 const execFileAsync = promisify(execFile);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..');
+loadPiEnvFileSync(resolvePiEnvFilePath({ cwd: process.cwd(), root: REPO_ROOT }), { override: false });
 
 // Load sync.json config (optional, falls back to env vars)
 let syncConfig = {};

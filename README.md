@@ -23,12 +23,12 @@ Use it to deploy the API Worker, run `wrangler dev`, apply the D1 schema, start 
 - `scripts/fleet-daemon.mjs` — local monitoring daemon
 - `dashboards/fleet/` — SvelteKit fleet dashboard (run locally with Vite or deploy to Cloudflare Pages)
 - `.githooks/pre-commit` — automatic infrastructure patch bump
-- `install.sh` — one-command bootstrap for the `pi` coding agent
 
 ## Quick start (coding agent)
 
 ```bash
-./install.sh
+npm install
+bash scripts/install-hooks.sh   # optional: git hooks
 pi
 ```
 
@@ -75,15 +75,7 @@ Inside `pi`, use:
    node scripts/secrets-sync.mjs machine-prod .env.runtime
    ```
 
-4. New machine enrollment:
-
-   ```bash
-   PI_SETUP_WORKER_URL=... PI_SETUP_BOOTSTRAP_TOKEN=... \
-   node scripts/enrollment-token-issue.mjs machine-01 machine-prod
-
-   PI_SETUP_WORKER_URL=... PI_SETUP_ENROLLMENT_TOKEN=... PI_SETUP_MASTER_KEY=... \
-   node scripts/machine-enroll.mjs .env.runtime
-   ```
+4. New machine: **`npm run enroll`** — admin issues a one-line `PI_SETUP_ENROLL_BUNDLE` command; target pastes and runs it (see [`docs/SECRETS.md`](docs/SECRETS.md)).
 
 ## Fleet daemon (summary)
 

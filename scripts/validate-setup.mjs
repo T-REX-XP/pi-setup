@@ -9,10 +9,9 @@ const required = [
   '.pi/agents/test-verifier.md',
   '.pi/agents/improver.md',
   'cloudflare/worker/src/index.ts',
-  'scripts/enrollment-token-issue.mjs',
-  'scripts/machine-enroll.mjs',
+  'scripts/pi-enroll.mjs',
+  'scripts/lib/pi-env-file.mjs',
   'scripts/observability-report.mjs',
-  'install.sh'
 ];
 
 for (const file of required) {

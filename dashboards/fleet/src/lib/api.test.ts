@@ -3,7 +3,7 @@
 // Run: npx vitest run
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiError, WorkerApiError, userMessage, withRetry, fetchHeartbeats } from './api';
+import { ApiError, WorkerApiError, userMessage, withRetry, fetchHeartbeats, deleteMachine } from './api';
 
 // ─── ApiError ────────────────────────────────────────────────────────────────
 
@@ -310,6 +310,142 @@ describe('apiGet error classification', () => {
     }));
     await expect(fetchHeartbeats()).rejects.toSatisfy(
       (e: unknown) => e instanceof ApiError && e.kind === 'unknown',
+    );
+  });
+});
+
+
+// ─── deleteMachine / apiDelete ──────────────────────────────────────────────
+
+describe('deleteMachine', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) =>
+        key === 'pi_worker_url' ? 'https://worker.example.com/' : 'tok-secret',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('calls fetch with DELETE method and correct URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(deleteMachine('machine-123')).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://worker.example.com/v1/machines/machine-123',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: { authorization: 'Bearer tok-secret' },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('returns { ok: true } on 200', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ ok: true }),
+    }));
+
+    await expect(deleteMachine('machine-123')).resolves.toEqual({ ok: true });
+  });
+
+  it('treats 404 as success and returns alreadyDeleted=true', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      headers: { get: (h: string) => h === 'x-request-id' ? 'req-404' : null },
+      text: async () => JSON.stringify({ error: 'machine not found' }),
+    }));
+
+    await expect(deleteMachine('gone-machine')).resolves.toEqual({
+      ok: true,
+      alreadyDeleted: true,
+      requestId: 'req-404',
+    });
+  });
+
+  it('throws ApiError(kind=auth) on 401', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ error: 'unauthorized' }),
+    }));
+
+    await expect(deleteMachine('machine-123')).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e.kind === 'auth' && e.status === 401,
+    );
+  });
+
+  it('throws ApiError(kind=server) on 500', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ error: 'db down' }),
+    }));
+
+    await expect(deleteMachine('machine-123')).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e.kind === 'server' && e.status === 500,
+    );
+  });
+
+  it('throws ApiError(kind=network) on fetch failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await expect(deleteMachine('machine-123')).rejects.toSatisfy(
+      (e: unknown) => e instanceof ApiError && e.kind === 'network',
+    );
+  });
+
+  it('throws ApiError(kind=timeout) when AbortController fires', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    }));
+
+    const promise = deleteMachine('slow-machine');
+    const caught = promise.catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(15_001);
+    const error = await caught;
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).kind).toBe('timeout');
+  });
+
+  it('encodes special characters in machineId via encodeURIComponent', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const machineId = 'machine id/with?weird#chars%';
+    await deleteMachine(machineId);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://worker.example.com/v1/machines/${encodeURIComponent(machineId)}`,
+      expect.objectContaining({ method: 'DELETE' }),
     );
   });
 });

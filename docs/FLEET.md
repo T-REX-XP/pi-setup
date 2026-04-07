@@ -24,6 +24,8 @@ node scripts/fleetctl.mjs diagnostics
 
 ### Push heartbeats to the Worker
 
+After **`npm run enroll`**, `.env.runtime` usually contains `PI_SETUP_WORKER_URL`, `PI_SETUP_BOOTSTRAP_TOKEN`, and `PI_SETUP_MACHINE_ID`; **`fleet-daemon.mjs` loads those automatically** (`.env.runtime` or `PI_SETUP_ENV_FILE`; env vars win).
+
 ```bash
 export PI_SETUP_WORKER_URL=https://<worker-url>
 export PI_SETUP_BOOTSTRAP_TOKEN=...

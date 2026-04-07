@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createDecipheriv, createHash } from 'node:crypto';
+import { loadPiEnvFile, resolvePiEnvFilePath } from './lib/pi-env-file.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
+await loadPiEnvFile(resolvePiEnvFilePath({ cwd: process.cwd(), root: ROOT }), { override: false });
 
 const workerUrl = process.env.PI_SETUP_WORKER_URL;
 const bootstrapToken = process.env.PI_SETUP_BOOTSTRAP_TOKEN;

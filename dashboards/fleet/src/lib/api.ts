@@ -270,7 +270,9 @@ export async function fetchUsage(machineId?: string): Promise<{ metrics: UsageMe
 }
 
 /** Delete a machine and all its data. 404 is treated as success. Never retried. */
-export async function deleteMachine(machineId: string): Promise<{ ok: boolean }> {
+export async function deleteMachine(
+  machineId: string,
+): Promise<{ ok: boolean; alreadyDeleted?: boolean }> {
   return apiDelete(`/v1/machines/${encodeURIComponent(machineId)}`);
 }
 

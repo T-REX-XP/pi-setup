@@ -667,17 +667,21 @@ export default {
         if (!admin.ok) return admin.response;
 
         const machineId = decodeURIComponent(url.pathname.slice('/v1/machines/'.length));
-        if (!machineId) return response(ctx, { ok: false, error: 'machineId required', requestId: ctx.requestId }, 400);
+        // Reject paths with extra segments (e.g. /v1/machines/foo/bar)
+        if (!machineId || machineId.includes('/')) return response(ctx, { ok: false, error: 'machineId required', requestId: ctx.requestId }, 400);
 
-        if (env.PI_DB) {
-          await env.PI_DB.prepare('DELETE FROM usage_metrics WHERE machine_id = ?').bind(machineId).run();
-          await env.PI_DB.prepare('DELETE FROM sessions WHERE machine_id = ?').bind(machineId).run();
-          const result = await env.PI_DB.prepare('DELETE FROM machines WHERE machine_id = ?').bind(machineId).run();
-          if (result.meta.changes === 0) {
-            return response(ctx, { ok: false, error: 'machine not found', requestId: ctx.requestId }, 404);
-          }
-        }
+        if (!env.PI_DB) return response(ctx, { ok: false, error: 'D1 not configured', requestId: ctx.requestId }, 503);
 
+        // Verify machine exists before touching child rows (prevents partial deletes on phantom IDs)
+        const existing = await env.PI_DB.prepare('SELECT machine_id FROM machines WHERE machine_id = ?').bind(machineId).first();
+        if (!existing) return response(ctx, { ok: false, error: 'machine not found', requestId: ctx.requestId }, 404);
+
+        // Cascade: delete dependents first, then the parent row
+        await env.PI_DB.prepare('DELETE FROM usage_metrics WHERE machine_id = ?').bind(machineId).run();
+        await env.PI_DB.prepare('DELETE FROM sessions WHERE machine_id = ?').bind(machineId).run();
+        await env.PI_DB.prepare('DELETE FROM machines WHERE machine_id = ?').bind(machineId).run();
+
+        // Clean up KV heartbeat and enrollment record
         await Promise.all([
           env.PI_SETUP_SECRETS.delete(`fleet:${machineId}`),
           env.PI_SETUP_SECRETS.delete(`machine:${machineId}`),
