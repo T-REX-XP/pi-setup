@@ -268,7 +268,16 @@ export default function (pi: ExtensionAPI) {
       });
   }
 
-  async function loadPendingWorkflow(): Promise<"active" | "cleared-completed" | "none"> {
+  // Stale thresholds: 1 hour if no phases have ever run, 12 hours if partially complete.
+  function isWorkflowStale(workflow: WorkflowState): boolean {
+    const ageMs = Date.now() - new Date(workflow.updatedAt).getTime();
+    const thresholdMs = workflow.results.length === 0
+      ? 60 * 60 * 1000        // 1 hour — never started
+      : 12 * 60 * 60 * 1000;  // 12 hours — abandoned mid-run
+    return ageMs > thresholdMs;
+  }
+
+  async function loadPendingWorkflow(): Promise<"active" | "cleared-completed" | "cleared-stale" | "none"> {
     try {
       pendingWorkflow = JSON.parse(await fs.readFile(workflowStateFile, "utf8"));
     } catch {
@@ -310,6 +319,22 @@ export default function (pi: ExtensionAPI) {
         reason: "completed-in-backlog",
       });
       return "cleared-completed";
+    }
+
+    if (isWorkflowStale(pendingWorkflow)) {
+      const cleared = pendingWorkflow;
+      pendingWorkflow = null;
+      await savePendingWorkflow();
+      await appendHistory({
+        type: "workflow-auto-cleared",
+        workflowId: cleared.id,
+        workflow: cleared.kind,
+        objective: cleared.objective,
+        reason: "stale",
+        phasesCompleted: cleared.results.length,
+        updatedAt: cleared.updatedAt,
+      });
+      return "cleared-stale";
     }
 
     return "active";
@@ -536,7 +561,28 @@ export default function (pi: ExtensionAPI) {
     if (!phase) return;
     const context = await buildContextBundle();
     const spec = phaseSpec(workflow.kind, phase, workflow.objective, workflow.results);
-    const output = await runNamedAgent(spec.agent, spec.prompt, context);
+
+    let output: string;
+    try {
+      output = await runNamedAgent(spec.agent, spec.prompt, context);
+    } catch (err) {
+      // Phase agent spawn or execution failed — persist updated timestamp so staleness
+      // detection can eventually auto-clear this workflow, and record the error.
+      pendingWorkflow = workflow;
+      workflow.updatedAt = new Date().toISOString();
+      await savePendingWorkflow();
+      await appendHistory({
+        type: "workflow-phase-error",
+        workflowId: workflow.id,
+        workflow: workflow.kind,
+        objective: workflow.objective,
+        phase,
+        phaseIndex: workflow.currentIndex,
+        error: String(err),
+      });
+      throw err;
+    }
+
     const result: PhaseResult = {
       phase,
       title: spec.title,
@@ -702,6 +748,8 @@ export default function (pi: ExtensionAPI) {
     const status = await loadPendingWorkflow();
     if (status === "cleared-completed") {
       ctx.ui.notify("Cleared stale pending workflow because the objective is already marked complete in the backlog.", "info");
+    } else if (status === "cleared-stale") {
+      ctx.ui.notify("Cleared stale pending workflow that had no activity for too long. Use /workflow-clear if you need to manually clear an active one.", "warning");
     }
   });
 
@@ -744,12 +792,18 @@ export default function (pi: ExtensionAPI) {
       const status = await loadPendingWorkflow();
       if (status === "cleared-completed") {
         ctx.ui.notify("Cleared stale pending workflow because the objective is already marked complete in the backlog.", "info");
+      } else if (status === "cleared-stale") {
+        ctx.ui.notify("Cleared stale pending workflow that had no activity for too long.", "warning");
       }
       if (!pendingWorkflow) {
         ctx.ui.notify("No pending workflow.", "warning");
         return;
       }
-      await runWorkflowPhase(pendingWorkflow);
+      try {
+        await runWorkflowPhase(pendingWorkflow);
+      } catch (err) {
+        ctx.ui.notify(`Phase failed: ${String(err)}. Fix the issue and retry with /continue, or clear with /workflow-clear.`, "error");
+      }
     },
   });
 
@@ -786,7 +840,18 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`Usage: /${kind} <objective>`, "warning");
           return;
         }
-        await startWorkflow(kind, args.trim());
+        try {
+          await startWorkflow(kind, args.trim());
+        } catch (err) {
+          // If startWorkflow threw after writing the pending file (e.g. first phase agent
+          // spawn failed), report to user so they know to /continue or /workflow-clear.
+          const msg = String(err);
+          if (!msg.includes("A workflow is already pending")) {
+            ctx.ui.notify(`Workflow phase 1 failed: ${msg}. Use /continue to retry or /workflow-clear to abandon.`, "error");
+          } else {
+            ctx.ui.notify(msg, "error");
+          }
+        }
       },
     });
   }
