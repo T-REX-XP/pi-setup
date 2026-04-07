@@ -23,6 +23,8 @@
   let relayError = '';
   let relayGaveUp = false;          // true after max retries exhausted
   let relayRetryCount = 0;
+  let relayDestroyed = false;       // set on onDestroy to suppress reconnects
+  let relayReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const RELAY_MAX_RETRIES = 10;
   const RELAY_BASE_DELAY  = 1_000; // ms
   const RELAY_MAX_DELAY   = 30_000;
@@ -36,8 +38,11 @@
   });
 
   onDestroy(() => {
+    relayDestroyed = true;
+    if (relayReconnectTimer !== null) clearTimeout(relayReconnectTimer);
     clearInterval(interval);
-    ws?.close();
+    // Null handlers before closing so onclose doesn't schedule another reconnect
+    if (ws) { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); ws = null; }
   });
 
   async function load() {
@@ -66,7 +71,7 @@
   }
 
   function connectRelay() {
-    if (relayGaveUp) return;
+    if (relayDestroyed || relayGaveUp) return;
     try {
       relayError = '';
       ws = openRelaySocket(machineId, 'observer');
@@ -74,16 +79,16 @@
       ws.onclose = () => {
         relayConnected = false;
         agentOnline = false;
-        if (relayGaveUp) return;
+        if (relayDestroyed || relayGaveUp) return;
         relayRetryCount++;
         if (relayRetryCount > RELAY_MAX_RETRIES) {
           relayGaveUp = true;
-          relayError = 'Relay unavailable after multiple attempts. Click “Reconnect” to try again.';
+          relayError = 'Relay unavailable after multiple attempts. Click "Reconnect" to try again.';
           return;
         }
         const delay = Math.min(RELAY_BASE_DELAY * 2 ** (relayRetryCount - 1), RELAY_MAX_DELAY);
         relayError = `Relay disconnected. Reconnecting in ${Math.round(delay / 1000)}s… (attempt ${relayRetryCount}/${RELAY_MAX_RETRIES})`;
-        setTimeout(connectRelay, delay);
+        relayReconnectTimer = setTimeout(connectRelay, delay);
       };
       ws.onerror = () => {
         relayConnected = false;
@@ -110,10 +115,14 @@
   }
 
   function manualReconnect() {
+    if (relayDestroyed) return;
+    // Cancel any pending auto-reconnect
+    if (relayReconnectTimer !== null) { clearTimeout(relayReconnectTimer); relayReconnectTimer = null; }
     relayGaveUp = false;
     relayRetryCount = 0;
     relayError = '';
-    ws?.close();
+    // Null handlers on the old socket BEFORE closing so onclose doesn't fire a competing reconnect
+    if (ws) { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); ws = null; }
     connectRelay();
   }
 
