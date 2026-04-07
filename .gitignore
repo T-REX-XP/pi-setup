@@ -10,5 +10,8 @@ playwright-report/
 test-results/
 *.log
 cloudflare/worker/*
-dashboards/fleet/*
+dashboards/fleet/node_modules/
+dashboards/fleet/.svelte-kit/
+dashboards/fleet/.wrangler/
+dashboards/fleet/dist/
 .env.runtime
