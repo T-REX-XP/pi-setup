@@ -528,7 +528,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.url === '/metrics') {
-    respond(200, { ...lastSnapshot, requestId: reqId });
+    // Attach live session-bridge summary if present
+    let activeBridgeSession = null;
+    try {
+      const bridgeFile = path.join(runtimeDir, 'session-bridge-active.json');
+      activeBridgeSession = JSON.parse(await readFile(bridgeFile, 'utf8'));
+    } catch { /* no active session */ }
+    respond(200, { ...lastSnapshot, activeBridgeSession, requestId: reqId });
     return;
   }
 
