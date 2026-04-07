@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import {
-    fetchHeartbeats, fetchMachines,
-    machineStatus, timeAgo, formatBytes, formatWorkerError,
+    fetchHeartbeats, fetchMachines, withRetry,
+    machineStatus, timeAgo, formatBytes, userMessage,
+    ApiError,
     type FleetHeartbeat, type Machine,
   } from '$lib/api';
 
@@ -35,14 +36,30 @@
 
   async function load() {
     try {
-      const [hb, m] = await Promise.allSettled([fetchHeartbeats(), fetchMachines()]);
+      const [hb, m] = await Promise.allSettled([
+        withRetry(() => fetchHeartbeats()),
+        withRetry(() => fetchMachines()),
+      ]);
       const errParts: string[] = [];
+
+      // Check if any rejection is an auth error → drop back to config screen
+      const reasons = [
+        hb.status === 'rejected' ? hb.reason : null,
+        m.status === 'rejected' ? m.reason : null,
+      ].filter(Boolean);
+      const hasAuthError = reasons.some((r) => r instanceof ApiError && r.kind === 'auth');
+      if (hasAuthError) {
+        configured = false;
+        error = 'Authentication failed — please re-enter your credentials.';
+        loading = false;
+        return;
+      }
 
       if (hb.status === 'fulfilled') {
         heartbeats = hb.value.heartbeats;
         heartbeatMap = Object.fromEntries(heartbeats.map((h) => [h.machineId, h]));
       } else {
-        errParts.push(`Heartbeats: ${formatWorkerError(hb.reason)}`);
+        errParts.push(`Heartbeats: ${userMessage(hb.reason)}`);
       }
 
       if (m.status === 'fulfilled') {
@@ -63,7 +80,7 @@
           status: machineStatus(h),
         }));
       } else if (m.status === 'rejected' && hb.status === 'fulfilled') {
-        errParts.push(`Machines: ${formatWorkerError(m.reason)}`);
+        errParts.push(`Machines: ${userMessage(m.reason)}`);
         machines = heartbeats.map((h) => ({
           machine_id: h.machineId,
           hostname: h.hostname,
@@ -74,13 +91,13 @@
           status: machineStatus(h),
         }));
       } else if (m.status === 'rejected' && hb.status === 'rejected') {
-        errParts.push(`Machines: ${formatWorkerError(m.reason)}`);
+        errParts.push(`Machines: ${userMessage(m.reason)}`);
         machines = [];
       }
 
       error = errParts.join(' — ');
     } catch (e) {
-      error = formatWorkerError(e);
+      error = userMessage(e);
     } finally {
       loading = false;
     }

@@ -1,26 +1,88 @@
 // src/lib/api.ts — Worker API client
 // Reads config from localStorage for dashboard-side auth.
 
-/** Thrown for HTTP error responses from the Worker (includes optional tracing id). */
-export class WorkerApiError extends Error {
-  readonly status: number;
-  readonly requestId?: string;
+/** Typed error kinds for granular UI feedback. */
+export type ApiErrorKind = 'network' | 'auth' | 'server' | 'timeout' | 'unknown';
 
-  constructor(message: string, status: number, requestId?: string) {
+/**
+ * Unified API error thrown by apiGet and openRelaySocket.
+ * - kind='network'  → offline / DNS / CORS / request aborted before response
+ * - kind='auth'     → HTTP 401 or 403
+ * - kind='server'   → HTTP 429 or 5xx (transient, retryable)
+ * - kind='timeout'  → AbortController fired after REQUEST_TIMEOUT_MS
+ * - kind='unknown'  → any other HTTP error
+ */
+export class ApiError extends Error {
+  readonly kind: ApiErrorKind;
+  readonly status?: number;
+  readonly requestId?: string;
+  /** True when a retry makes sense (network blip, server overload). */
+  readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    kind: ApiErrorKind,
+    opts: { status?: number; requestId?: string } = {},
+  ) {
     super(message);
-    this.name = 'WorkerApiError';
-    this.status = status;
-    this.requestId = requestId;
+    this.name = 'ApiError';
+    this.kind = kind;
+    this.status = opts.status;
+    this.requestId = opts.requestId;
+    this.retryable = kind === 'network' || kind === 'server' || kind === 'timeout';
   }
 }
 
-export function formatWorkerError(err: unknown): string {
-  if (err instanceof WorkerApiError) {
-    const id = err.requestId ? ` — request ${err.requestId}` : '';
-    return `${err.message}${id}`;
+/** @deprecated Use ApiError — kept for backward-compat call sites. */
+export class WorkerApiError extends ApiError {
+  constructor(message: string, status: number, requestId?: string) {
+    const kind: ApiErrorKind =
+      status === 401 || status === 403
+        ? 'auth'
+        : status === 429 || status >= 500
+          ? 'server'
+          : 'unknown';
+    super(message, kind, { status, requestId });
+    this.name = 'WorkerApiError';
   }
-  if (err instanceof Error) return err.message;
-  return String(err);
+}
+
+/** Return a user-friendly string for any thrown value. */
+export function userMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    const suffix = e.requestId ? ` (request ${e.requestId})` : '';
+    switch (e.kind) {
+      case 'network':  return `Network error — are you online and is the Worker URL correct?${suffix}`;
+      case 'auth':     return `Authentication failed — check your admin token.${suffix}`;
+      case 'server':   return `Server error — the Worker returned ${e.status ?? 'an error'}. Try again shortly.${suffix}`;
+      case 'timeout':  return `Request timed out — the Worker did not respond in time.${suffix}`;
+      default:         return `${e.message}${suffix}`;
+    }
+  }
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
+/** @deprecated Alias for userMessage — kept for backward-compat call sites. */
+export const formatWorkerError = userMessage;
+
+/** Retry fn up to maxRetries times, with exponential back-off, only when error.retryable. */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 2,
+  baseDelayMs = 1_000,
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= maxRetries || !(e instanceof ApiError) || !e.retryable) throw e;
+      const delay = baseDelayMs * 2 ** attempt;
+      await new Promise((r) => setTimeout(r, delay));
+      attempt++;
+    }
+  }
 }
 
 function messageFromErrorBody(body: unknown): string | undefined {
@@ -89,20 +151,37 @@ function getConfig() {
   };
 }
 
+/** How long before an in-flight request is aborted. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function apiGet<T>(path: string): Promise<T> {
   const { workerUrl, token } = getConfig();
-  if (!workerUrl) throw new Error('Worker URL not configured');
+  if (!workerUrl) throw new ApiError('Worker URL not configured', 'unknown');
 
   const url = `${workerUrl}${path}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
   let res: Response;
   try {
     res = await fetch(url, {
       headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal,
     });
-  } catch {
-    throw new Error(
-      `Could not reach the worker at ${workerUrl}. Check the URL, your network, and that the Worker allows this origin (CORS).`,
+  } catch (fetchErr) {
+    clearTimeout(timer);
+    if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+      throw new ApiError(
+        `Request to ${workerUrl} timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`,
+        'timeout',
+      );
+    }
+    throw new ApiError(
+      `Could not reach the Worker at ${workerUrl}. Check the URL, your network, and that the Worker allows this origin (CORS).`,
+      'network',
     );
+  } finally {
+    clearTimeout(timer);
   }
 
   const requestId = res.headers.get('x-request-id') || undefined;
@@ -110,27 +189,25 @@ async function apiGet<T>(path: string): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     let parsed: unknown;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = text;
-    }
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
     const fromBody =
       typeof parsed === 'string' && parsed.trim()
         ? parsed.slice(0, 200)
         : messageFromErrorBody(parsed);
-    const base =
-      fromBody ||
-      (res.status === 401 || res.status === 403
-        ? 'Unauthorized — check your admin token.'
-        : res.statusText || `HTTP ${res.status}`);
-    throw new WorkerApiError(base, res.status, requestId);
+    const base = fromBody || res.statusText || `HTTP ${res.status}`;
+    const kind: ApiErrorKind =
+      res.status === 401 || res.status === 403
+        ? 'auth'
+        : res.status === 429 || res.status >= 500
+          ? 'server'
+          : 'unknown';
+    throw new ApiError(base, kind, { status: res.status, requestId });
   }
 
   try {
     return (await res.json()) as T;
   } catch {
-    throw new Error('Worker returned a response that is not valid JSON.');
+    throw new ApiError('Worker returned a response that is not valid JSON.', 'unknown');
   }
 }
 
@@ -154,8 +231,8 @@ export async function fetchUsage(machineId?: string): Promise<{ metrics: UsageMe
 
 export function openRelaySocket(machineId: string, role: 'observer'): WebSocket {
   const { workerUrl, token } = getConfig();
-  if (!workerUrl) throw new Error('Worker URL not configured');
-  if (!token) throw new Error('Admin token not configured');
+  if (!workerUrl) throw new ApiError('Worker URL not configured — go back and re-enter your credentials.', 'unknown');
+  if (!token) throw new ApiError('Admin token not configured — go back and re-enter your credentials.', 'auth');
   const wsUrl = workerUrl.replace(/^http/, 'ws');
   const ws = new WebSocket(`${wsUrl}/v1/relay/${encodeURIComponent(machineId)}?role=${role}&token=${encodeURIComponent(token)}`);
   return ws;

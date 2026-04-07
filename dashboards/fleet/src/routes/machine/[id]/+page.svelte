@@ -2,8 +2,9 @@
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import {
-    fetchHeartbeats, fetchSessions, openRelaySocket,
-    machineStatus, timeAgo, formatBytes, formatWorkerError,
+    fetchHeartbeats, fetchSessions, openRelaySocket, withRetry,
+    machineStatus, timeAgo, formatBytes, userMessage,
+    ApiError,
     type FleetHeartbeat, type Session,
   } from '$lib/api';
 
@@ -20,6 +21,11 @@
   let agentOnline = false;
   let relayConnected = false;
   let relayError = '';
+  let relayGaveUp = false;          // true after max retries exhausted
+  let relayRetryCount = 0;
+  const RELAY_MAX_RETRIES = 10;
+  const RELAY_BASE_DELAY  = 1_000; // ms
+  const RELAY_MAX_DELAY   = 30_000;
 
   let interval: ReturnType<typeof setInterval>;
 
@@ -36,39 +42,52 @@
 
   async function load() {
     try {
-      const [hb, s] = await Promise.allSettled([fetchHeartbeats(), fetchSessions(machineId)]);
+      const [hb, s] = await Promise.allSettled([
+        withRetry(() => fetchHeartbeats()),
+        withRetry(() => fetchSessions(machineId)),
+      ]);
       const errParts: string[] = [];
       if (hb.status === 'fulfilled') {
         heartbeat = hb.value.heartbeats.find((h) => h.machineId === machineId);
       } else {
-        errParts.push(`Heartbeats: ${formatWorkerError(hb.reason)}`);
+        errParts.push(`Heartbeats: ${userMessage(hb.reason)}`);
       }
       if (s.status === 'fulfilled') {
         sessions = s.value.sessions;
       } else {
-        errParts.push(`Sessions: ${formatWorkerError(s.reason)}`);
+        errParts.push(`Sessions: ${userMessage(s.reason)}`);
       }
       error = errParts.join(' — ');
     } catch (e) {
-      error = formatWorkerError(e);
+      error = userMessage(e);
     } finally {
       loading = false;
     }
   }
 
   function connectRelay() {
+    if (relayGaveUp) return;
     try {
       relayError = '';
       ws = openRelaySocket(machineId, 'observer');
-      ws.onopen = () => { relayConnected = true; relayError = ''; };
+      ws.onopen = () => { relayConnected = true; relayError = ''; relayRetryCount = 0; };
       ws.onclose = () => {
         relayConnected = false;
         agentOnline = false;
-        // Reconnect after 5s
-        setTimeout(connectRelay, 5_000);
+        if (relayGaveUp) return;
+        relayRetryCount++;
+        if (relayRetryCount > RELAY_MAX_RETRIES) {
+          relayGaveUp = true;
+          relayError = 'Relay unavailable after multiple attempts. Click “Reconnect” to try again.';
+          return;
+        }
+        const delay = Math.min(RELAY_BASE_DELAY * 2 ** (relayRetryCount - 1), RELAY_MAX_DELAY);
+        relayError = `Relay disconnected. Reconnecting in ${Math.round(delay / 1000)}s… (attempt ${relayRetryCount}/${RELAY_MAX_RETRIES})`;
+        setTimeout(connectRelay, delay);
       };
       ws.onerror = () => {
         relayConnected = false;
+        // onerror always precedes onclose; set message here, onclose handles reconnect
         relayError = 'WebSocket error — check worker URL, token, and that the relay route is deployed.';
       };
       ws.onmessage = (ev) => {
@@ -86,8 +105,16 @@
         }
       };
     } catch (e) {
-      relayError = formatWorkerError(e);
+      relayError = userMessage(e);
     }
+  }
+
+  function manualReconnect() {
+    relayGaveUp = false;
+    relayRetryCount = 0;
+    relayError = '';
+    ws?.close();
+    connectRelay();
   }
 
   $: status = heartbeat ? machineStatus(heartbeat) as 'online'|'stale'|'offline' : 'offline';
@@ -109,7 +136,12 @@
   <div class="error-banner card">{error}</div>
 {/if}
 {#if relayError}
-  <div class="error-banner card relay-warn">{relayError}</div>
+  <div class="error-banner card relay-warn">
+    {relayError}
+    {#if relayGaveUp}
+      <button class="btn btn-sm" style="margin-left:1rem" on:click={manualReconnect}>↻ Reconnect</button>
+    {/if}
+  </div>
 {/if}
 
 {#if heartbeat}

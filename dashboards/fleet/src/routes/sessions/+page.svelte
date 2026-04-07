@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { fetchSessions, fetchUsage, timeAgo, formatWorkerError, type Session, type UsageMetric } from '$lib/api';
+  import { fetchSessions, fetchUsage, withRetry, timeAgo, userMessage, type Session, type UsageMetric } from '$lib/api';
 
   let sessions: Session[] = [];
   let metrics: UsageMetric[] = [];
@@ -21,8 +21,8 @@
   async function load() {
     try {
       const [s, u] = await Promise.allSettled([
-        fetchSessions(machineFilter || undefined),
-        fetchUsage(machineFilter || undefined),
+        withRetry(() => fetchSessions(machineFilter || undefined)),
+        withRetry(() => fetchUsage(machineFilter || undefined)),
       ]);
       const errParts: string[] = [];
       if (s.status === 'fulfilled') {
@@ -30,16 +30,16 @@
         sessionsFetchFailed = false;
       } else {
         sessionsFetchFailed = true;
-        errParts.push(`Sessions: ${formatWorkerError(s.reason)}`);
+        errParts.push(`Sessions: ${userMessage(s.reason)}`);
       }
       if (u.status === 'fulfilled') {
         metrics = u.value.metrics;
       } else {
-        errParts.push(`Usage: ${formatWorkerError(u.reason)}`);
+        errParts.push(`Usage: ${userMessage(u.reason)}`);
       }
       error = errParts.join(' — ');
     } catch (e) {
-      error = formatWorkerError(e);
+      error = userMessage(e);
       sessionsFetchFailed = true;
     } finally {
       loading = false;
