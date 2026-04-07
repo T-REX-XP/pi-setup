@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { fetchSessions, fetchUsage, timeAgo, type Session, type UsageMetric } from '$lib/api';
+  import { fetchSessions, fetchUsage, timeAgo, formatWorkerError, type Session, type UsageMetric } from '$lib/api';
 
   let sessions: Session[] = [];
   let metrics: UsageMetric[] = [];
   let loading = true;
   let error = '';
+  let sessionsFetchFailed = false;
   let machineFilter = '';
   let interval: ReturnType<typeof setInterval>;
 
@@ -23,11 +24,23 @@
         fetchSessions(machineFilter || undefined),
         fetchUsage(machineFilter || undefined),
       ]);
-      if (s.status === 'fulfilled') sessions = s.value.sessions;
-      if (u.status === 'fulfilled') metrics = u.value.metrics;
-      error = '';
+      const errParts: string[] = [];
+      if (s.status === 'fulfilled') {
+        sessions = s.value.sessions;
+        sessionsFetchFailed = false;
+      } else {
+        sessionsFetchFailed = true;
+        errParts.push(`Sessions: ${formatWorkerError(s.reason)}`);
+      }
+      if (u.status === 'fulfilled') {
+        metrics = u.value.metrics;
+      } else {
+        errParts.push(`Usage: ${formatWorkerError(u.reason)}`);
+      }
+      error = errParts.join(' — ');
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = formatWorkerError(e);
+      sessionsFetchFailed = true;
     } finally {
       loading = false;
     }
@@ -82,7 +95,11 @@
 
 {#if sessions.length === 0 && !loading}
   <div class="card empty-state">
-    <p>No sessions recorded yet. Sessions appear here once the fleet daemon starts pushing them.</p>
+    {#if sessionsFetchFailed}
+      <p>Sessions could not be loaded. Fix the error above (URL, token, or network) and refresh.</p>
+    {:else}
+      <p>No sessions recorded yet. Sessions appear here once the fleet daemon starts pushing them.</p>
+    {/if}
   </div>
 {:else}
   <div class="card table-card">

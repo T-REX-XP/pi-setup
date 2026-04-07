@@ -3,10 +3,11 @@
   import { page } from '$app/stores';
   import {
     fetchHeartbeats, fetchSessions, openRelaySocket,
-    machineStatus, timeAgo, formatBytes, type FleetHeartbeat, type Session,
+    machineStatus, timeAgo, formatBytes, formatWorkerError,
+    type FleetHeartbeat, type Session,
   } from '$lib/api';
 
-  const machineId = decodeURIComponent($page.params.id);
+  const machineId = decodeURIComponent($page.params.id ?? '');
 
   let heartbeat: FleetHeartbeat | undefined;
   let sessions: Session[] = [];
@@ -18,6 +19,7 @@
   let relayLog: string[] = [];
   let agentOnline = false;
   let relayConnected = false;
+  let relayError = '';
 
   let interval: ReturnType<typeof setInterval>;
 
@@ -35,13 +37,20 @@
   async function load() {
     try {
       const [hb, s] = await Promise.allSettled([fetchHeartbeats(), fetchSessions(machineId)]);
+      const errParts: string[] = [];
       if (hb.status === 'fulfilled') {
         heartbeat = hb.value.heartbeats.find((h) => h.machineId === machineId);
+      } else {
+        errParts.push(`Heartbeats: ${formatWorkerError(hb.reason)}`);
       }
-      if (s.status === 'fulfilled') sessions = s.value.sessions;
-      error = '';
+      if (s.status === 'fulfilled') {
+        sessions = s.value.sessions;
+      } else {
+        errParts.push(`Sessions: ${formatWorkerError(s.reason)}`);
+      }
+      error = errParts.join(' — ');
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = formatWorkerError(e);
     } finally {
       loading = false;
     }
@@ -49,15 +58,19 @@
 
   function connectRelay() {
     try {
+      relayError = '';
       ws = openRelaySocket(machineId, 'observer');
-      ws.onopen = () => { relayConnected = true; };
+      ws.onopen = () => { relayConnected = true; relayError = ''; };
       ws.onclose = () => {
         relayConnected = false;
         agentOnline = false;
         // Reconnect after 5s
         setTimeout(connectRelay, 5_000);
       };
-      ws.onerror = () => { relayConnected = false; };
+      ws.onerror = () => {
+        relayConnected = false;
+        relayError = 'WebSocket error — check worker URL, token, and that the relay route is deployed.';
+      };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -72,8 +85,8 @@
           relayLog = [ev.data, ...relayLog].slice(0, 200);
         }
       };
-    } catch {
-      // Worker URL not configured — relay unavailable
+    } catch (e) {
+      relayError = formatWorkerError(e);
     }
   }
 
@@ -94,6 +107,9 @@
 
 {#if error}
   <div class="error-banner card">{error}</div>
+{/if}
+{#if relayError}
+  <div class="error-banner card relay-warn">{relayError}</div>
 {/if}
 
 {#if heartbeat}
@@ -191,7 +207,6 @@
   .stat-value { font-size: 1.2rem; font-weight: 700; margin-top: 4px; }
   .stat-sub { font-size: 0.75rem; font-weight: 400; color: var(--text-muted); }
 
-  .relay-card { }
   .relay-dot {
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--text-muted);
@@ -216,5 +231,6 @@
   .table-card { padding: 0; overflow: hidden; }
   code { font-family: 'SF Mono', monospace; }
   .error-banner { background: var(--red-dim); border-color: var(--red); color: var(--red); margin-bottom: 1rem; }
+  .relay-warn { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
   .empty-state { color: var(--text-muted); text-align: center; padding: 2rem; }
 </style>

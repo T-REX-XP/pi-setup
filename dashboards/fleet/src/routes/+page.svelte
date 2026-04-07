@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     fetchHeartbeats, fetchMachines,
-    machineStatus, timeAgo, formatBytes,
+    machineStatus, timeAgo, formatBytes, formatWorkerError,
     type FleetHeartbeat, type Machine,
   } from '$lib/api';
 
@@ -36,15 +36,21 @@
   async function load() {
     try {
       const [hb, m] = await Promise.allSettled([fetchHeartbeats(), fetchMachines()]);
+      const errParts: string[] = [];
+
       if (hb.status === 'fulfilled') {
         heartbeats = hb.value.heartbeats;
         heartbeatMap = Object.fromEntries(heartbeats.map((h) => [h.machineId, h]));
+      } else {
+        errParts.push(`Heartbeats: ${formatWorkerError(hb.reason)}`);
       }
+
       if (m.status === 'fulfilled') {
         machines = m.value.machines || [];
       } else if (hb.status === 'fulfilled') {
         machines = [];
       }
+
       // D1 can be empty while KV has enrollments / heartbeats only — still show fleet from heartbeats
       if (m.status === 'fulfilled' && hb.status === 'fulfilled' && machines.length === 0 && heartbeats.length > 0) {
         machines = heartbeats.map((h) => ({
@@ -57,6 +63,7 @@
           status: machineStatus(h),
         }));
       } else if (m.status === 'rejected' && hb.status === 'fulfilled') {
+        errParts.push(`Machines: ${formatWorkerError(m.reason)}`);
         machines = heartbeats.map((h) => ({
           machine_id: h.machineId,
           hostname: h.hostname,
@@ -66,10 +73,14 @@
           last_seen_at: h.receivedAt,
           status: machineStatus(h),
         }));
+      } else if (m.status === 'rejected' && hb.status === 'rejected') {
+        errParts.push(`Machines: ${formatWorkerError(m.reason)}`);
+        machines = [];
       }
-      error = '';
+
+      error = errParts.join(' — ');
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = formatWorkerError(e);
     } finally {
       loading = false;
     }
