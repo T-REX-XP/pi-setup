@@ -15,6 +15,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 ### Backlog
 - [x] Implement browser/Playwright support for the current `pi.dev` setup.
 - [ ] Standardize versioning and release automation across `pi.dev`, the Worker, and `nas-ui` artifacts.
+- [ ] Fix pre-existing SvelteKit/Svelte peer-dependency version mismatch warnings in `dashboards/fleet` that produce build noise and may mask real warnings in CI output.
 
 ## nas-ui
 
