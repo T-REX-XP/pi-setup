@@ -2,14 +2,28 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
+// Load sync.json config (optional, falls back to env vars)
+let syncConfig = {};
+try {
+  syncConfig = JSON.parse(await readFile(path.resolve('sync.json'), 'utf8'));
+} catch { /* no sync.json, use env vars */ }
 
 const runtimeDir = path.resolve('.pi/runtime');
 const stateFile = path.join(runtimeDir, 'fleet-daemon.json');
 const commandFile = path.join(runtimeDir, 'fleet-commands.jsonl');
-const port = Number(process.env.PI_SETUP_DAEMON_PORT || 4269);
-const heartbeatIntervalMs = Number(process.env.PI_SETUP_HEARTBEAT_INTERVAL_MS || 15000);
-const workerUrl = process.env.PI_SETUP_WORKER_URL;
+const pushedSessionsFile = path.join(runtimeDir, 'pushed-sessions.json');
+const port = Number(process.env.PI_SETUP_DAEMON_PORT || syncConfig.daemonPort || 4269);
+const heartbeatIntervalMs = Number(process.env.PI_SETUP_HEARTBEAT_INTERVAL_MS || syncConfig.heartbeatIntervalMs || 60000);
+const gitSyncIntervalMs = Number(process.env.PI_SETUP_GIT_SYNC_INTERVAL_MS || syncConfig.gitSyncIntervalMs || 300000);
+const sessionScanIntervalMs = Number(process.env.PI_SETUP_SESSION_SCAN_INTERVAL_MS || syncConfig.sessionScanIntervalMs || 120000);
+const maxBackoffMs = Number(process.env.PI_SETUP_MAX_BACKOFF_MS || syncConfig.maxBackoffMs || 300000);
+const workerUrl = process.env.PI_SETUP_WORKER_URL || syncConfig.workerUrl || '';
 const bootstrapToken = process.env.PI_SETUP_BOOTSTRAP_TOKEN;
 const machineId = process.env.PI_SETUP_MACHINE_ID || os.hostname();
 
@@ -116,15 +130,171 @@ async function refreshState() {
     diagnostics: {
       daemonPort: port,
       heartbeatIntervalMs,
+      gitSyncIntervalMs,
+      sessionScanIntervalMs,
       workerConfigured: Boolean(workerUrl && bootstrapToken),
       lastRefreshedAt: new Date().toISOString(),
     },
   };
 }
 
+// ─── Exponential backoff retry ───────────────────────────────────────────────
+async function withBackoff(fn, label, initialDelayMs = 5000) {
+  let delay = initialDelayMs;
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      attempt++;
+      const msg = error instanceof Error ? error.message : String(error);
+      log('warn', `${label}.retry`, { attempt, delayMs: delay, error: msg });
+      await new Promise((res) => setTimeout(res, delay));
+      delay = Math.min(delay * 2, maxBackoffMs);
+    }
+  }
+}
+
+// ─── Git sync ────────────────────────────────────────────────────────────────
+async function gitSync() {
+  try {
+    await execFileAsync('git', ['fetch', 'origin', '--prune'], { cwd: process.cwd() });
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: process.cwd() });
+    const branch = stdout.trim();
+    await execFileAsync('git', ['merge', '--ff-only', `origin/${branch}`], { cwd: process.cwd() });
+    log('info', 'git.sync.ok', { branch });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    // Not fatal — repo may have local uncommitted changes or no remote
+    if (!msg.includes('Already up to date') && !msg.includes('not something we can merge')) {
+      log('warn', 'git.sync.skipped', { reason: msg.split('\n')[0] });
+    }
+  }
+}
+
+// ─── Pi session discovery & transcript push ──────────────────────────────────
+async function loadPushedSessions() {
+  try {
+    return JSON.parse(await readFile(pushedSessionsFile, 'utf8'));
+  } catch {
+    return {}; // { [sessionId]: { pushedAt, messageCount } }
+  }
+}
+
+async function savePushedSessions(record) {
+  await writeFile(pushedSessionsFile, JSON.stringify(record, null, 2), 'utf8');
+}
+
+function encodeCwd(cwd) {
+  // Pi encodes cwd as '--path-segments--' replacing / with - 
+  return '--' + cwd.replace(/^[/\\]/, '').replace(/[/\\]/g, '-') + '--';
+}
+
+async function scanPiSessions(cwd) {
+  const sessionsBase = path.join(os.homedir(), '.pi', 'agent', 'sessions');
+  const encoded = encodeCwd(cwd);
+  const sessionDir = path.join(sessionsBase, encoded);
+  try {
+    const files = await readdir(sessionDir);
+    return files
+      .filter((f) => f.endsWith('.jsonl'))
+      .map((f) => ({
+        file: path.join(sessionDir, f),
+        filename: f,
+        // Filename: <ISO>_<UUID>.jsonl
+        sessionId: f.replace(/\.jsonl$/, '').split('_').slice(1).join('_'),
+        startedAt: f.split('_')[0].replace(/-/g, (m, i) => i < 10 ? '-' : (i === 10 ? 'T' : (i === 13 || i === 16 ? ':' : '.'))).replace(/-(\d{3})Z/, '.$1Z'),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function pushSessions() {
+  if (!workerUrl || !bootstrapToken) return;
+  const pushed = await loadPushedSessions();
+  const cwd = process.cwd();
+  const sessions = await scanPiSessions(cwd);
+
+  for (const session of sessions) {
+    try {
+      const content = await readFile(session.file, 'utf8');
+      const lines = content.trim().split('\n').filter(Boolean);
+      const events = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      const messageCount = events.filter((e) => e.type === 'message' || e.type === 'tool_call' || e.type === 'tool_result').length;
+
+      const prev = pushed[session.sessionId];
+      if (prev && prev.messageCount === messageCount) continue; // nothing new
+
+      // Parse model/provider from first model_change event
+      const modelEvent = events.find((e) => e.type === 'model_change');
+      const model = modelEvent?.modelId || null;
+      const provider = modelEvent?.provider || null;
+
+      // Detect session end
+      const lastEvent = events.at(-1);
+      const ended = lastEvent?.type === 'session_end';
+      const endedAt = ended ? lastEvent.timestamp : null;
+
+      // Extract usage from cost events
+      const usageEvents = events.filter((e) => e.type === 'usage' || e.type === 'cost');
+      const totalTokens = usageEvents.reduce((acc, e) => ({
+        input: acc.input + (e.inputTokens || 0),
+        output: acc.output + (e.outputTokens || 0),
+        cost: acc.cost + (e.costUsd || e.cost || 0),
+      }), { input: 0, output: 0, cost: 0 });
+
+      const sessionPayload = {
+        sessionId: session.sessionId,
+        machineId,
+        cwd,
+        model,
+        provider,
+        startedAt: events[0]?.timestamp || session.startedAt,
+        endedAt,
+        status: ended ? 'ended' : 'active',
+        messageCount,
+      };
+
+      await fetch(`${workerUrl.replace(/\/$/, '')}/v1/sessions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${bootstrapToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify(sessionPayload),
+      });
+
+      // Push usage if any
+      if (totalTokens.input || totalTokens.output) {
+        await fetch(`${workerUrl.replace(/\/$/, '')}/v1/usage`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${bootstrapToken}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            machineId,
+            sessionId: session.sessionId,
+            model,
+            provider,
+            inputTokens: totalTokens.input,
+            outputTokens: totalTokens.output,
+            costUsd: totalTokens.cost,
+          }),
+        });
+      }
+
+      pushed[session.sessionId] = { pushedAt: new Date().toISOString(), messageCount };
+      log('info', 'session.pushed', { sessionId: session.sessionId, messageCount, ended });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log('warn', 'session.push.failed', { sessionId: session.sessionId, error: msg });
+    }
+  }
+
+  await savePushedSessions(pushed);
+}
+
 await mkdir(runtimeDir, { recursive: true });
 let lastSnapshot = await refreshState();
 await writeFile(stateFile, JSON.stringify(lastSnapshot, null, 2) + '\n', 'utf8');
+
+// Heartbeat loop with exponential backoff on network failures
 setInterval(async () => {
   try {
     lastSnapshot = await refreshState();
@@ -133,6 +303,22 @@ setInterval(async () => {
     log('error', 'state.refresh.failed', { error: error instanceof Error ? error.message : String(error) });
   }
 }, heartbeatIntervalMs);
+
+// Git sync loop
+setInterval(async () => {
+  try { await gitSync(); }
+  catch (error) { log('error', 'git.sync.error', { error: error instanceof Error ? error.message : String(error) }); }
+}, gitSyncIntervalMs);
+// Initial git sync after 10s (avoid blocking startup)
+setTimeout(() => gitSync().catch(() => {}), 10_000);
+
+// Pi session push loop
+setInterval(async () => {
+  try { await pushSessions(); }
+  catch (error) { log('error', 'session.scan.error', { error: error instanceof Error ? error.message : String(error) }); }
+}, sessionScanIntervalMs);
+// Initial session scan after 30s
+setTimeout(() => pushSessions().catch(() => {}), 30_000);
 
 const server = http.createServer(async (req, res) => {
   const reqId = requestId(req);

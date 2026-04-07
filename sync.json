@@ -1,0 +1,9 @@
+{
+  "workerUrl": "",
+  "heartbeatIntervalMs": 60000,
+  "gitSyncIntervalMs": 300000,
+  "sessionScanIntervalMs": 120000,
+  "daemonPort": 4269,
+  "maxBackoffMs": 300000,
+  "_comment": "Set workerUrl to your Cloudflare Worker URL. All intervals are in milliseconds."
+}
