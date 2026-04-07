@@ -9,3 +9,6 @@ coverage/
 playwright-report/
 test-results/
 *.log
+cloudflare/worker/*
+dashboards/fleet/*
+.env.runtime
