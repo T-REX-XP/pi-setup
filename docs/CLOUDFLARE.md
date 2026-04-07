@@ -39,7 +39,7 @@ authentication model, and deployment procedures.
 | `name` | Worker name — `pi-setup-secrets` |
 | `main` | Entry point — `src/index.ts` |
 | `kv_namespaces[].binding` | `PI_SETUP_SECRETS` |
-| `kv_namespaces[].id` | KV namespace ID from `wrangler kv:namespace create` |
+| `kv_namespaces[].id` | KV namespace ID from `wrangler kv namespace create` |
 | `d1_databases[].binding` | `PI_DB` |
 | `d1_databases[].database_id` | D1 database ID from `wrangler d1 create pi-setup-db` |
 | `durable_objects.bindings[].name` | `PI_RELAY` |
@@ -509,7 +509,7 @@ CREATE TABLE usage_metrics (
 
 ```bash
 # KV namespace
-wrangler kv:namespace create PI_SETUP_SECRETS
+wrangler kv namespace create PI_SETUP_SECRETS
 # → paste the returned id into wrangler.toml kv_namespaces[].id
 
 # D1 database

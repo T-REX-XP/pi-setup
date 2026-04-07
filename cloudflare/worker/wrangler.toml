@@ -9,8 +9,7 @@ id = "ba01ae4309d343059f70318844f2f1a9"
 [[d1_databases]]
 binding = "PI_DB"
 database_name = "pi-setup-db"
-# Run: wrangler d1 create pi-setup-db  then paste the id here
-database_id = "YOUR_D1_DATABASE_ID"
+database_id = "15940061-ad1d-4e43-9a70-b6ffc42257a2"
 
 [durable_objects]
 bindings = [
@@ -19,7 +18,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["PIRelayDurableObject"]
+new_sqlite_classes = ["PIRelayDurableObject"]
 
 [vars]
 PI_SETUP_ALLOWED_ORIGIN = "*"
