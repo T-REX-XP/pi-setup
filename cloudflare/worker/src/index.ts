@@ -86,12 +86,27 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_TRACE_LIST_LIMIT = 100;
 
+/** Must include every method used by the fleet dashboard (DELETE needs preflight with Authorization). */
+const CORS_ALLOW_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+const CORS_ALLOW_HEADERS = 'authorization, content-type, x-request-id';
+
+/**
+ * When wrangler allows `*`, echo the browser's `Origin` so preflight + Authorization works reliably
+ * (some stacks mishandle `*` + credentialed-style requests).
+ */
+function effectiveCorsOrigin(request: Request, env: Env): string {
+  const configured = (env.PI_SETUP_ALLOWED_ORIGIN ?? '*').trim() || '*';
+  if (configured !== '*') return configured;
+  return request.headers.get('Origin')?.trim() || '*';
+}
+
 function json(data: unknown, status = 200, origin = '*', requestId?: string) {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     'access-control-allow-origin': origin,
-    'access-control-allow-headers': 'authorization, content-type, x-request-id',
-    'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS'
+    'access-control-allow-headers': CORS_ALLOW_HEADERS,
+    'access-control-allow-methods': CORS_ALLOW_METHODS,
+    vary: 'Origin',
   };
   if (requestId) headers['x-request-id'] = requestId;
   return new Response(JSON.stringify(data, null, 2), { status, headers });
@@ -319,12 +334,22 @@ async function upsertMachine(db: D1Database, machineId: string, fields: Record<s
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const origin = env.PI_SETUP_ALLOWED_ORIGIN || '*';
-    const ctx = requestContext(request, origin);
+    const allowOrigin = effectiveCorsOrigin(request, env);
+    const ctx = requestContext(request, allowOrigin);
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
-      return response(ctx, { ok: true, requestId: ctx.requestId }, 200);
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'access-control-allow-origin': allowOrigin,
+          'access-control-allow-headers': CORS_ALLOW_HEADERS,
+          'access-control-allow-methods': CORS_ALLOW_METHODS,
+          'access-control-max-age': '86400',
+          vary: 'Origin',
+          'x-request-id': ctx.requestId,
+        },
+      });
     }
 
     log('info', 'request.start', ctx);

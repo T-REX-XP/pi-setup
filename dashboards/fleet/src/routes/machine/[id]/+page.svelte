@@ -9,7 +9,9 @@
     type FleetHeartbeat, type Session,
   } from '$lib/api';
 
-  const machineId = decodeURIComponent($page.params.id ?? '');
+  export let params: { id?: string } = {};
+
+  const machineId = decodeURIComponent(params.id ?? $page.params.id ?? '');
 
   let heartbeat: FleetHeartbeat | undefined;
   let sessions: Session[] = [];

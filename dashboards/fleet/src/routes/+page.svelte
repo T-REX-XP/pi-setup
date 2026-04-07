@@ -7,6 +7,8 @@
     type FleetHeartbeat, type Machine,
   } from '$lib/api';
 
+  export let params: Record<string, string> = {};
+
   let machines: Machine[] = [];
   let heartbeats: FleetHeartbeat[] = [];
   let heartbeatMap: Record<string, FleetHeartbeat> = {};
@@ -150,6 +152,8 @@
 </script>
 
 <svelte:head><title>pi fleet — machines</title></svelte:head>
+
+<span class="sr-only" aria-hidden="true">{Object.keys(params).length ? '' : ''}</span>
 
 {#if !configured}
   <!-- ── Config panel ── -->

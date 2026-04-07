@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { fetchSessions, fetchUsage, withRetry, timeAgo, userMessage, type Session, type UsageMetric } from '$lib/api';
 
+  export let params: Record<string, string> = {};
+
   let sessions: Session[] = [];
   let metrics: UsageMetric[] = [];
   let loading = true;
@@ -71,6 +73,8 @@
 </script>
 
 <svelte:head><title>pi fleet — sessions</title></svelte:head>
+
+<span class="sr-only" aria-hidden="true">{Object.keys(params).length >= 0 ? '' : ''}</span>
 
 <div class="flex items-center justify-between mb-4">
   <div>

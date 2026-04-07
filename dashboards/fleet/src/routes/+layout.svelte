@@ -1,6 +1,8 @@
 <script lang="ts">
   import '../app.css';
   import { page } from '$app/stores';
+
+  export let params: Record<string, string> = {};
 </script>
 
 <header>
@@ -18,7 +20,7 @@
   </nav>
 </header>
 
-<main class="container">
+<main class="container" data-route-params={Object.keys(params).sort().join(',') || 'none'}>
   <slot />
 </main>
 
