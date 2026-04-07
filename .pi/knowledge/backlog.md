@@ -13,7 +13,7 @@ Build `pi.dev` into an operator-friendly automation and fleet-management workspa
 - [x] Auto-clear stale completed pending workflows in the pi.dev orchestrator.
 
 ### Backlog
-- [ ] Implement browser/Playwright support for the current `pi.dev` setup.
+- [x] Implement browser/Playwright support for the current `pi.dev` setup.
 - [ ] Standardize versioning and release automation across `pi.dev`, the Worker, and `nas-ui` artifacts.
 
 ## nas-ui
