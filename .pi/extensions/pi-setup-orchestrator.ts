@@ -370,11 +370,12 @@ export default function (pi: ExtensionAPI) {
     }).join("\n\n");
   }
 
-  async function spawnPi(agent: AgentConfig, prompt: string, cwd: string = repoRoot): Promise<string> {
+  async function spawnPi(agent: AgentConfig, prompt: string, cwd: string = repoRoot, context = ""): Promise<string> {
+    const systemPrompt = context ? `${agent.systemPrompt}\n\n${context}` : agent.systemPrompt;
     const args: string[] = [];
     if (agent.model) args.push("--model", agent.model);
     if (agent.tools?.length) args.push("--tools", agent.tools.join(","));
-    args.push("-p", "--no-session", "--system-prompt", agent.systemPrompt, prompt);
+    args.push("-p", "--no-session", "--system-prompt", systemPrompt, prompt);
 
     return await new Promise<string>((resolve, reject) => {
       const child = spawn("pi", args, {
@@ -406,11 +407,11 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
-  async function runNamedAgent(agentName: string, prompt: string): Promise<string> {
+  async function runNamedAgent(agentName: string, prompt: string, context = ""): Promise<string> {
     const agents = await loadAgents();
     const agent = agents[agentName];
     if (!agent) throw new Error(`Unknown agent: ${agentName}`);
-    return await spawnPi(agent, prompt);
+    return await spawnPi(agent, prompt, repoRoot, context);
   }
 
   function reviewVectorsPrompt(topic: string, artifact: string, initialRequest: string, priorResults: PhaseResult[], vector: string): string {
@@ -533,8 +534,9 @@ export default function (pi: ExtensionAPI) {
   async function runWorkflowPhase(workflow: WorkflowState): Promise<void> {
     const phase = workflow.phases[workflow.currentIndex];
     if (!phase) return;
+    const context = await buildContextBundle();
     const spec = phaseSpec(workflow.kind, phase, workflow.objective, workflow.results);
-    const output = await runNamedAgent(spec.agent, spec.prompt);
+    const output = await runNamedAgent(spec.agent, spec.prompt, context);
     const result: PhaseResult = {
       phase,
       title: spec.title,
@@ -590,10 +592,11 @@ export default function (pi: ExtensionAPI) {
   async function runParallelReview(objective: string): Promise<void> {
     const artifact = pendingWorkflow?.results.at(-1)?.output ?? objective;
     const priorResults = pendingWorkflow?.results ?? [];
+    const context = await buildContextBundle();
     const vectors = ["correctness", "architecture", "security"];
     const outputs = await Promise.all(vectors.map(async (vector) => ({
       vector,
-      output: await runNamedAgent("cross-reviewer", reviewVectorsPrompt(objective, artifact, objective, priorResults, vector)),
+      output: await runNamedAgent("cross-reviewer", reviewVectorsPrompt(objective, artifact, objective, priorResults, vector), context),
     })));
 
     const findings = outputs.flatMap((item) => parseReviewFindings(item.vector, item.output));
@@ -615,14 +618,16 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function runSinglePhase(phase: PhaseName, objective: string): Promise<void> {
+    const context = await buildContextBundle();
     const spec = phaseSpec("task", phase, objective, pendingWorkflow?.results ?? []);
     const output = phase === "review"
-      ? await runNamedAgent("cross-reviewer", reviewVectorsPrompt(objective, objective, objective, pendingWorkflow?.results ?? [], "correctness"))
-      : await runNamedAgent(spec.agent, spec.prompt);
+      ? await runNamedAgent("cross-reviewer", reviewVectorsPrompt(objective, objective, objective, pendingWorkflow?.results ?? [], "correctness"), context)
+      : await runNamedAgent(spec.agent, spec.prompt, context);
     await emitPhaseResult({ phase, title: spec.title, agent: spec.agent, output, createdAt: new Date().toISOString() });
   }
 
   async function runRecurse(goal: string, maxIterations = 5): Promise<void> {
+    const context = await buildContextBundle();
     const failures: string[] = [];
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
       const workPrompt = [
@@ -632,7 +637,7 @@ export default function (pi: ExtensionAPI) {
         "Do the work now.",
         "Strict instruction: do not repeat fixes that have already failed, try a different approach.",
       ].join("\n\n");
-      const workOutput = await runNamedAgent("creator", workPrompt);
+      const workOutput = await runNamedAgent("creator", workPrompt, context);
       await emitPhaseResult({ phase: "code", title: `Recurse Work ${iteration}`, agent: "creator", output: workOutput, createdAt: new Date().toISOString() });
 
       const testOutput = await runNamedAgent("tester", [
@@ -641,7 +646,7 @@ export default function (pi: ExtensionAPI) {
         failures.length ? `Previous failed fixes and error logs:\n${failures.join("\n\n---\n\n")}` : "",
         `Iteration: ${iteration}`,
         "Your job is not to confirm it works — it's to try to break it.",
-      ].join("\n\n"));
+      ].join("\n\n"), context);
       await emitPhaseResult({ phase: "test", title: `Recurse Test ${iteration}`, agent: "tester", output: testOutput, createdAt: new Date().toISOString() });
 
       const evaluation = await runNamedAgent("test-verifier", [
@@ -651,7 +656,7 @@ export default function (pi: ExtensionAPI) {
         failures.length ? `Previous failed fixes and error logs:\n${failures.join("\n\n---\n\n")}` : "",
         `Iteration: ${iteration}`,
         "Return STATUS: PASS or STATUS: FAIL.",
-      ].join("\n\n"));
+      ].join("\n\n"), context);
       await emitPhaseResult({ phase: "verify", title: `Recurse Evaluate ${iteration}`, agent: "test-verifier", output: evaluation, createdAt: new Date().toISOString() });
 
       if (/STATUS:\s*PASS/i.test(evaluation)) {
@@ -678,15 +683,13 @@ export default function (pi: ExtensionAPI) {
     const creatorOutput = await runNamedAgent("creator", [
       "Analyze the external idea and convert it into an integration plan for the current pi-setup.",
       `Idea:\n${idea}`,
-      context,
       "Return: fit assessment, affected assets, implementation outline, and rollout order.",
-    ].join("\n\n"));
+    ].join("\n\n"), context);
     const reviewerOutput = await runNamedAgent("cross-reviewer", [
       `Idea:\n${idea}`,
       `Proposed integration plan:\n${creatorOutput}`,
-      context,
       "Review for blind spots, conflicts with current rules, and missing safeguards.",
-    ].join("\n\n"));
+    ].join("\n\n"), context);
     pi.sendMessage({
       customType: "idea-pipeline",
       display: true,
@@ -702,14 +705,10 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (event) => {
     const context = await buildContextBundle();
     return {
-      message: {
-        customType: "pi-setup-context",
-        content: context,
-        display: false,
-      },
+      systemPrompt: `${event.systemPrompt}\n\n${context}`,
     };
   });
 
@@ -844,6 +843,18 @@ export default function (pi: ExtensionAPI) {
         objective: cleared.objective,
       });
       ctx.ui.notify(`Cleared pending workflow: ${cleared.kind} -> ${cleared.objective}`, "info");
+    },
+  });
+
+  pi.registerCommand("context", {
+    description: "Display the current compounding context that is injected into every agent",
+    handler: async (_args, _ctx) => {
+      const context = await buildContextBundle();
+      pi.sendMessage({
+        customType: "pi-setup-context",
+        display: true,
+        content: context,
+      }, { triggerTurn: false });
     },
   });
 }
