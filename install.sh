@@ -135,6 +135,38 @@ fi
 
 _ok "PATH and PI_REAL_PI written to $PROFILE"
 
+# ─── 6. systemd user unit (Linux) — fleet daemon ────────────────────────────
+if [[ "$(uname -s)" == "Linux" ]] && command -v systemctl &>/dev/null; then
+  _log "Writing systemd user unit for the fleet daemon…"
+  NODE_BIN="$(command -v node || true)"
+  if [[ -z "$NODE_BIN" ]]; then
+    _warn "node not found in PATH — skipping pi-setup-fleet.service"
+  else
+    USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    mkdir -p "$USER_UNIT_DIR"
+    UNIT_FILE="$USER_UNIT_DIR/pi-setup-fleet.service"
+    cat >"$UNIT_FILE" <<UNIT
+[Unit]
+Description=pi-setup fleet daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$REPO_ROOT
+ExecStart=$NODE_BIN $REPO_ROOT/scripts/fleet-daemon.mjs
+Restart=always
+RestartSec=5
+Environment=PI_SETUP_DAEMON_PORT=4269
+
+[Install]
+WantedBy=default.target
+UNIT
+    _ok "Wrote $UNIT_FILE"
+    _log "Enable with: systemctl --user daemon-reload && systemctl --user enable --now pi-setup-fleet.service"
+    _warn "User units start after login; for headless hosts use: loginctl enable-linger \"\$USER\""
+  fi
+fi
+
 # ─── Done ────────────────────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"

@@ -103,7 +103,16 @@ See [`SETUP.md`](SETUP.md) for CORS notes and troubleshooting.
 
 ## Service install (systemd)
 
-Copy `services/systemd/pi-setup-fleet.service` to your user systemd directory and enable it.
+On **Linux**, **`./install.sh`** writes **`~/.config/systemd/user/pi-setup-fleet.service`** with `WorkingDirectory` and `ExecStart` pointing at **this clone** (so `.env.runtime` and `sync.json` in the repo root are picked up). Then:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now pi-setup-fleet.service
+```
+
+For a machine without an interactive login, enable **lingering** so user units run at boot: `loginctl enable-linger "$USER"`.
+
+**Manual install:** copy `services/systemd/pi-setup-fleet.service` to `~/.config/systemd/user/` and set `WorkingDirectory` to your repo path (the default in the repo file is `%h/pi.dev` for a home-directory clone named `pi.dev`).
 
 ---
 
