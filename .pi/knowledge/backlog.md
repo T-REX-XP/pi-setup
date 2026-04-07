@@ -4,9 +4,11 @@
 
 - [ ] **Integrate VS Code for the Web** — Support browser-based editing and inspection alongside the repo: e.g. document or automate opening this clone in **vscode.dev** / **github.dev**, optional **dev container** metadata for consistent environments, and/or fleet-dashboard links that jump to the right GitHub path in the web editor. If remote machines are involved, evaluate **code tunnel** / forwarded ports vs. static Pages-only flows; keep auth and secrets out of the browser surface.
 
-- [x] **Fix SvelteKit peer-dependency warnings in `dashboards/fleet`** — Bumped `@sveltejs/adapter-cloudflare` from `^4.0.0` to `^5.0.0` (accepts `wrangler ^3.87.0 || ^4.0.0`); downgraded `vitest` from `^4.1.3` to `^2.1.9` (compatible with `vite ^5`); added `vitest.config.ts`; fixed fake-timer guards in tests. `npm install` now runs clean with zero peer-dep errors. (Completed: 2026-04-07)
+- [ ] **Telegram chatbot integration** — Expose controlled interactions over **Telegram Bot API**: webhook or long-poll receiver (e.g. Cloudflare Worker route or daemon-side), **bot token** and optional **allowlisted chat/user IDs** stored via existing secrets patterns (no tokens in repo). Scope candidates: fleet status summaries, enrollment or health alerts, or a thin bridge to agent sessions with strict rate limits and audit logging.
 
 ## Completed
+
+- [x] **Fix SvelteKit peer-dependency warnings in `dashboards/fleet`** — Bumped `@sveltejs/adapter-cloudflare` from `^4.0.0` to `^5.0.0` (accepts `wrangler ^3.87.0 || ^4.0.0`); downgraded `vitest` from `^4.1.3` to `^2.1.9` (compatible with `vite ^5`); added `vitest.config.ts`; fixed fake-timer guards in tests. `npm install` now runs clean with zero peer-dep errors. (Completed: 2026-04-07)
 
 - [x] **Install `pwsh` on dev machine** — Installed via `brew install powershell` (v7.6.0). PSScriptAnalyzer module also installed. (Completed: 2026-04-07)
 
