@@ -56,8 +56,11 @@ if ($env:PI_REAL_PI -and (Test-Path $env:PI_REAL_PI)) {
 
 # 1b. Walk $env:PATH
 if (-not $RealPi) {
-    $Extensions = @('pi.cmd', 'pi.ps1', 'pi.exe', 'pi')
-    foreach ($dir in ($env:PATH -split ';')) {
+    # Enumerate extensions from $env:PATHEXT (e.g. .CMD;.PS1;.EXE) so we honour
+    # user/system customisations; always include bare name as final fallback.
+    $pathExtList = if ($env:PATHEXT) { $env:PATHEXT -split ';' | Where-Object { $_ } } else { @('.COM','.EXE','.BAT','.CMD','.PS1') }
+    $Extensions  = ($pathExtList | ForEach-Object { "pi$_" }) + 'pi'
+    foreach ($dir in (if ($env:PATH) { $env:PATH -split ';' } else { @() })) {
         $dir = $dir.Trim()
         if (-not $dir) { continue }
         $dirNorm = try { [IO.Path]::GetFullPath($dir).ToLowerInvariant() } catch { continue }
@@ -179,19 +182,25 @@ $content = ''
 if (Test-Path $ProfilePath) {
     # Read as raw bytes and detect encoding to avoid corrupting existing profiles
     $rawBytes = [IO.File]::ReadAllBytes($ProfilePath)
-    # Detect UTF-16LE BOM (FF FE)
+    # Detect BOM and record the encoding so we can preserve it on write-back.
+    $detectedEncoding = $null
     if ($rawBytes.Length -ge 2 -and $rawBytes[0] -eq 0xFF -and $rawBytes[1] -eq 0xFE) {
+        # UTF-16LE BOM
+        $detectedEncoding = [Text.Encoding]::Unicode
         $content = [Text.Encoding]::Unicode.GetString($rawBytes, 2, $rawBytes.Length - 2)
     } elseif ($rawBytes.Length -ge 3 -and $rawBytes[0] -eq 0xEF -and $rawBytes[1] -eq 0xBB -and $rawBytes[2] -eq 0xBF) {
         # UTF-8 BOM
+        $detectedEncoding = New-Object Text.UTF8Encoding $true
         $content = [Text.Encoding]::UTF8.GetString($rawBytes, 3, $rawBytes.Length - 3)
     } elseif ($rawBytes.Length -gt 0) {
         # Default: try UTF-8. If the file contains code-page/ANSI bytes that are
         # invalid UTF-8, fall back to the system default encoding (ANSI on en-US
         # Windows) so we don't mangle existing content.
         try {
+            $detectedEncoding = New-Object Text.UTF8Encoding $false
             $content = (New-Object Text.UTF8Encoding $false, $true).GetString($rawBytes)
         } catch {
+            $detectedEncoding = [Text.Encoding]::Default
             $content = [Text.Encoding]::Default.GetString($rawBytes)
         }
     }
@@ -218,8 +227,10 @@ $block = $blockLines -join "`n"
 # Append block with surrounding newlines
 $content = $content.TrimEnd() + "`n`n" + $block + "`n"
 
-# Write as UTF-8 without BOM (compatible with both PS 5.1 and PS 7+)
-[IO.File]::WriteAllText($ProfilePath, $content, (New-Object Text.UTF8Encoding $false))
+# Write back using the detected encoding to preserve the original file encoding.
+# For new files (detectedEncoding is $null) default to UTF-8 no-BOM.
+$writeEncoding = if ($detectedEncoding) { $detectedEncoding } else { New-Object Text.UTF8Encoding $false }
+[IO.File]::WriteAllText($ProfilePath, $content, $writeEncoding)
 
 Ok "PATH and PI_REAL_PI written to $ProfilePath"
 
@@ -231,12 +242,18 @@ Write-Host ''
 Write-Host '╔══════════════════════════════════════════════════════════╗'
 Write-Host '║  Installation complete!                                  ║'
 Write-Host '╠══════════════════════════════════════════════════════════╣'
-Write-Host ('║  Wrapper:   {0,-44}║' -f (Join-Path $BinDir 'pi.ps1'))
-Write-Host ('║  Real pi:   {0,-44}║' -f $realPiDisplay)
-Write-Host ('║  Profile:   {0,-44}║' -f $ProfilePath)
+# Fit a string into exactly $w chars, ellipsizing if too long.
+function Fit([string]$s, [int]$w) {
+    if ($null -eq $s) { return ' ' * $w }
+    if ($s.Length -le $w) { return $s.PadRight($w) }
+    return $s.Substring(0, $w - 1) + [char]0x2026  # …
+}
+Write-Host ('║  Wrapper:   {0}║' -f (Fit (Join-Path $BinDir 'pi.ps1') 44))
+Write-Host ('║  Real pi:   {0}║' -f (Fit $realPiDisplay 44))
+Write-Host ('║  Profile:   {0}║' -f (Fit $ProfilePath 44))
 Write-Host '╠══════════════════════════════════════════════════════════╣'
 Write-Host '║  Next steps:                                             ║'
-Write-Host ('║    . {0,-50}║' -f $ProfilePath)
+Write-Host ('║    . {0}║' -f (Fit $ProfilePath 50))
 Write-Host '║    pi                  # opens pi with session tagging   ║'
 Write-Host '║    npm run init        # configure daemon & enrollment   ║'
 Write-Host '╚══════════════════════════════════════════════════════════╝'

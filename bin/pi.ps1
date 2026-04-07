@@ -32,8 +32,11 @@ function Find-RealPi {
     }
 
     # 2. Walk PATH, skip our own bin/ directory
-    $Extensions = @('pi.cmd', 'pi.ps1', 'pi.exe', 'pi')
-    foreach ($dir in ($env:PATH -split ';')) {
+    # Enumerate extensions from $env:PATHEXT to honour system config;
+    # always include bare name as final fallback.
+    $pathExtList = if ($env:PATHEXT) { $env:PATHEXT -split ';' | Where-Object { $_ } } else { @('.COM','.EXE','.BAT','.CMD','.PS1') }
+    $Extensions  = ($pathExtList | ForEach-Object { "pi$_" }) + 'pi'
+    foreach ($dir in (if ($env:PATH) { $env:PATH -split ';' } else { @() })) {
         $dir = $dir.Trim()
         if (-not $dir) { continue }
         $dirNorm = try { [IO.Path]::GetFullPath($dir).ToLowerInvariant() } catch { continue }
