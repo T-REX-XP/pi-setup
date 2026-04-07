@@ -402,6 +402,20 @@ export default {
           enrolledAt: new Date().toISOString(),
           metadata: enrollmentMetadata || {},
         }));
+        if (env.PI_DB) {
+          const meta = enrollmentMetadata || {};
+          const hostname =
+            typeof meta.hostname === 'string' && meta.hostname.trim() ? meta.hostname.trim() : payload.machineId;
+          const enrolledAt = new Date().toISOString();
+          await upsertMachine(env.PI_DB, payload.machineId, {
+            hostname,
+            platform: typeof meta.platform === 'string' ? meta.platform : null,
+            arch: typeof meta.arch === 'string' ? meta.arch : null,
+            enrolled_at: enrolledAt,
+            last_seen_at: enrolledAt,
+            status: 'enrolled',
+          });
+        }
         log('info', 'machine.enrolled', ctx, { machineId: payload.machineId, secretName: payload.secretName });
         return response(ctx, { ok: true, machineId: payload.machineId, secretName: payload.secretName, bootstrapToken: await signToken(bootstrapPayload, env.PI_SETUP_ENROLLMENT_SIGNING_KEY), bootstrapExpiresAt: isoFromSeconds(bootstrapExp), requestId: ctx.requestId }, 200);
       }

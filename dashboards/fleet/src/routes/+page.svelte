@@ -41,9 +41,22 @@
         heartbeatMap = Object.fromEntries(heartbeats.map((h) => [h.machineId, h]));
       }
       if (m.status === 'fulfilled') {
-        machines = m.value.machines;
+        machines = m.value.machines || [];
       } else if (hb.status === 'fulfilled') {
-        // Fall back to heartbeat list if D1 not yet configured
+        machines = [];
+      }
+      // D1 can be empty while KV has enrollments / heartbeats only — still show fleet from heartbeats
+      if (m.status === 'fulfilled' && hb.status === 'fulfilled' && machines.length === 0 && heartbeats.length > 0) {
+        machines = heartbeats.map((h) => ({
+          machine_id: h.machineId,
+          hostname: h.hostname,
+          platform: h.platform,
+          arch: h.arch,
+          enrolled_at: null,
+          last_seen_at: h.receivedAt,
+          status: machineStatus(h),
+        }));
+      } else if (m.status === 'rejected' && hb.status === 'fulfilled') {
         machines = heartbeats.map((h) => ({
           machine_id: h.machineId,
           hostname: h.hostname,

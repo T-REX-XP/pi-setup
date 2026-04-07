@@ -24,3 +24,10 @@ const res = await fetch(`${workerUrl.replace(/\/$/, '')}/v1/enrollment-tokens/is
 const text = await res.text();
 console.log(text);
 if (!res.ok) process.exit(1);
+console.error(`
+Next step (on the machine you are enrolling — issuing a token does not register the node by itself):
+  export PI_SETUP_ENROLLMENT_TOKEN='<paste the "token" JWT from above>'
+  PI_SETUP_WORKER_URL=... PI_SETUP_MASTER_KEY=... node scripts/machine-enroll.mjs .env.runtime
+
+After that, run the fleet daemon with PI_SETUP_WORKER_URL + PI_SETUP_BOOTSTRAP_TOKEN so heartbeats appear in the dashboard.
+`);

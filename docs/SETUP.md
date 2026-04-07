@@ -195,6 +195,9 @@ API base: **http://localhost:8787**. Set `sync.json` → `workerUrl` to that URL
 | D1 error `10021` (invalid id) | `database_id` in `wrangler.toml` must be the UUID from `wrangler d1 list` |
 | Durable Object error `10097` (free plan) | Migration must use `new_sqlite_classes` in `wrangler.toml` |
 | Dashboard overlay / Vite error | `dashboards/fleet/vite.config.ts` must import `sveltekit` from `@sveltejs/kit/vite` |
+| `ws://localhost:undefined` / HMR WebSocket failed | Use **http://localhost:5173** (not a bare host without port). Restart `npm run dev` after pulling; port **5173** must be free (`strictPort` is on). |
+| 404 on `favicon.png` | Fixed: app uses `static/favicon.svg`. Hard-refresh the browser. |
+| `runtime.lastError: Receiving end does not exist` | Comes from a **browser extension** (not this app). Ignore or test in a clean profile. |
 | Pages deploy fails | Create the Pages project first; ensure `npm run build` succeeds in `dashboards/fleet` |
 
 ---

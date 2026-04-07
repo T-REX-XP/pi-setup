@@ -37,20 +37,29 @@ node scripts/secrets-sync.mjs <secret-name> .env.runtime
 ```
 
 ## Enroll a new machine with a short-lived Worker-issued token
+
+**Two steps:** (1) issue a token with the **admin** bootstrap token; (2) on the **target machine**, call enroll with the **enrollment** JWT. Step 1 alone does not register the node in KV/D1 or the dashboard.
+
 Issue the enrollment token from an already trusted operator environment:
+
 ```bash
 PI_SETUP_WORKER_URL=https://<worker-url> \
 PI_SETUP_BOOTSTRAP_TOKEN=... \
 node scripts/enrollment-token-issue.mjs <machine-id> <secret-name> [ttl-seconds]
 ```
 
-Then run enrollment on the target machine:
+Then run **on the machine being enrolled** (copy the `token` value from the JSON):
+
 ```bash
 PI_SETUP_WORKER_URL=https://<worker-url> \
-PI_SETUP_ENROLLMENT_TOKEN=... \
+PI_SETUP_ENROLLMENT_TOKEN='<JWT from enrollment-token-issue output>' \
 PI_SETUP_MASTER_KEY=... \
 node scripts/machine-enroll.mjs .env.runtime
 ```
+
+That `POST /v1/machines/enroll` call writes `machine:<id>` in KV, upserts the row in D1 (so the fleet dashboard can list it), and fetches the encrypted secret using the short-lived bootstrap token from the response.
+
+To show **live** status in the dashboard, run the fleet daemon with `PI_SETUP_WORKER_URL` and `PI_SETUP_BOOTSTRAP_TOKEN` so it posts heartbeats.
 
 Behavior:
 - enrollment tokens are signed by the Worker and expire quickly
