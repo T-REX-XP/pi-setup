@@ -102,7 +102,13 @@
     {#if sessionsFetchFailed}
       <p>Sessions could not be loaded. Fix the error above (URL, token, or network) and refresh.</p>
     {:else}
-      <p>No sessions recorded yet. Sessions appear here once the fleet daemon starts pushing them.</p>
+      <p class="empty-lead"><strong>No sessions in the Worker yet.</strong> The dashboard reads D1; rows are created when the fleet daemon POSTs Pi transcripts.</p>
+      <ul class="empty-hints">
+        <li>Run <code>npm run daemon</code> from the repo root on a machine where you use <code>pi</code>.</li>
+        <li>Ensure <code>PI_SETUP_WORKER_URL</code> and <code>PI_SETUP_BOOTSTRAP_TOKEN</code> are set (e.g. in <code>.env.runtime</code> after enroll).</li>
+        <li>The daemon must use the <strong>same current working directory</strong> as your Pi sessions — it only uploads files under <code>~/.pi/agent/sessions/</code> for that cwd.</li>
+        <li>First scan runs ~30s after startup; default rescan every 2&nbsp;min — then refresh here.</li>
+      </ul>
     {/if}
   </div>
 {:else}
@@ -149,5 +155,15 @@
   .table-card { padding: 0; overflow: hidden; }
   .session-id code { font-size: 0.8rem; color: var(--text-muted); font-family: 'SF Mono', monospace; }
   .error-banner { background: var(--red-dim); border-color: var(--red); color: var(--red); margin-bottom: 1rem; }
-  .empty-state { color: var(--text-muted); text-align: center; padding: 3rem; }
+  .empty-state { color: var(--text-muted); padding: 2rem 1.5rem; max-width: 560px; margin: 0 auto; }
+  .empty-lead { text-align: left; margin-bottom: 1rem; line-height: 1.5; }
+  .empty-hints {
+    text-align: left;
+    margin: 0;
+    padding-left: 1.25rem;
+    line-height: 1.55;
+    font-size: 0.9rem;
+  }
+  .empty-hints li { margin: 0.4rem 0; }
+  .empty-hints code { font-size: 0.82rem; color: var(--text); }
 </style>

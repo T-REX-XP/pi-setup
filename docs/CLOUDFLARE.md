@@ -366,19 +366,27 @@ Open a real-time relay channel for a machine. Each machine gets its own Durable 
 | Param | Values | Description |
 |-------|--------|-------------|
 | `role` | `agent` \| `observer` | `agent` — fleet daemon or pi process; `observer` — dashboard |
+| `token` | bootstrap secret | **Browsers:** pass `PI_SETUP_BOOTSTRAP_TOKEN` here (WebSocket cannot send `Authorization`). **Server:** `Authorization: Bearer` is enough. |
 
 **Relay behaviour**
 - When an `observer` connects it receives an immediate `relay:welcome` frame: `{ "type": "relay:agent-connected" }` or `{ "type": "relay:agent-disconnected" }`.
 - Messages sent by the `agent` are broadcast to all connected `observer`s and vice versa.
 - When an `agent` connects/disconnects, all observers are notified.
 
-**Example (JavaScript)**
+**Example (browser — token in query)**
 ```js
 const ws = new WebSocket(
-  `wss://<worker-url>/v1/relay/mac-mini-01?role=observer`,
-  { headers: { Authorization: `Bearer ${token}` } }
+  `wss://<worker-url>/v1/relay/${encodeURIComponent(machineId)}?role=observer&token=${encodeURIComponent(token)}`
 );
 ws.onmessage = (e) => console.log(JSON.parse(e.data));
+```
+
+**Example (fetch from Worker / Node — header)**
+```js
+// Subrequests can set Authorization; query token is optional.
+await fetch(`https://worker/v1/relay/${id}?role=agent`, {
+  headers: { Authorization: `Bearer ${token}`, Upgrade: 'websocket', ... },
+});
 ```
 
 ---

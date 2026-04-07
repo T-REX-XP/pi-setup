@@ -120,6 +120,23 @@ function isAdminAuth(auth: string | null, env: Env) {
   return auth === `Bearer ${env.PI_SETUP_BOOTSTRAP_TOKEN}`;
 }
 
+/**
+ * Admin check for WebSocket relay: browsers cannot set `Authorization` on WebSocket,
+ * so the fleet dashboard sends `?token=<PI_SETUP_BOOTSTRAP_TOKEN>` (see openRelaySocket).
+ */
+function isAdminRelayAuth(request: Request, env: Env): boolean {
+  if (isAdminAuth(request.headers.get('authorization'), env)) return true;
+  const url = new URL(request.url);
+  const q = url.searchParams.get('token');
+  return Boolean(q && q === env.PI_SETUP_BOOTSTRAP_TOKEN);
+}
+
+function requireAdminRelay(request: Request, env: Env, ctx: RequestContext) {
+  if (isAdminRelayAuth(request, env)) return { ok: true as const };
+  log('warn', 'auth.unauthorized.relay', ctx);
+  return { ok: false as const, response: unauthorized(ctx) };
+}
+
 function b64urlEncode(input: ArrayBuffer | Uint8Array | string) {
   const bytes = typeof input === 'string' ? encoder.encode(input) : input instanceof Uint8Array ? input : new Uint8Array(input);
   let binary = '';
@@ -596,7 +613,7 @@ export default {
 
       // ── WebSocket relay (Durable Object) ─────────────────────────────────
       if (url.pathname.startsWith('/v1/relay/')) {
-        const admin = await requireAdmin(request, env, ctx);
+        const admin = requireAdminRelay(request, env, ctx);
         if (!admin.ok) return admin.response;
         if (request.headers.get('Upgrade') !== 'websocket') {
           return response(ctx, { ok: false, error: 'Expected WebSocket upgrade', requestId: ctx.requestId }, 426);

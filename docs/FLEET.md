@@ -38,6 +38,10 @@ When configured, the daemon posts to `POST /v1/fleet/heartbeat` and stores the l
 
 Each request carries an `x-request-id` for tracing.
 
+### Sessions in the dashboard
+
+The daemon periodically scans **`~/.pi/agent/sessions/<encoded-cwd>/`** for `*.jsonl` Pi transcripts and POSTs them to **`/v1/sessions`** (same bootstrap token as heartbeats). **`process.cwd()`** when the daemon starts must match the directory you use when running **`pi`** — otherwise the encoded path does not match and nothing is uploaded. The first scan runs about **30s** after startup; adjust **`PI_SETUP_SESSION_SCAN_INTERVAL_MS`** / `sync.json` → `sessionScanIntervalMs` if needed.
+
 ---
 
 ## Centralized data (curl)
