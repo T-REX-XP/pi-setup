@@ -21,7 +21,8 @@
     "machine:enroll": "node scripts/machine-enroll.mjs",
     "trace:websocket": "node scripts/websocket-event-trace.mjs",
     "observability:report": "node scripts/observability-report.mjs",
-    "validate": "node scripts/validate-setup.mjs"
+    "validate": "node scripts/validate-setup.mjs",
+    "e2e": "node scripts/browser-e2e.mjs"
   },
   "dependencies": {
     "playwright": "^1.53.0"
