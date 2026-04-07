@@ -34,6 +34,14 @@ Inside `pi`, use:
 - `/idea <external concept>`
 - `/continue`
 
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md) | Full Cloudflare Worker API reference, D1 schema, Durable Object relay, KV layout, and deployment |
+| [`docs/SECRETS.md`](docs/SECRETS.md) | Step-by-step secret upload, pull, and machine enrollment workflow |
+| [`docs/FLEET.md`](docs/FLEET.md) | Fleet daemon configuration, `fleetctl` usage, and dashboard |
+
 ## Secret flow
 1. Deploy `cloudflare/worker/` with a KV namespace plus `PI_SETUP_BOOTSTRAP_TOKEN` and `PI_SETUP_ENROLLMENT_SIGNING_KEY` secrets.
 2. Encrypt and upload a blob:

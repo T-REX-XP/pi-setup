@@ -1,5 +1,7 @@
 # Fleet Daemon
 
+> For the Worker-side fleet API endpoints (`/v1/fleet/*`, `/v1/relay/*`, `/v1/diagnostics`) see [`docs/CLOUDFLARE.md`](CLOUDFLARE.md).
+
 ## Start locally
 ```bash
 node scripts/fleet-daemon.mjs
@@ -57,3 +59,7 @@ Copy `services/systemd/pi-setup-fleet.service` to your user systemd directory an
 
 ## Dashboard
 Open `dashboards/fleet/index.html` after the daemon is running.
+
+## See also
+- [`docs/CLOUDFLARE.md`](CLOUDFLARE.md) — Worker API reference, heartbeat schema, WebSocket relay
+- [`docs/SECRETS.md`](SECRETS.md) — credential upload and machine enrollment

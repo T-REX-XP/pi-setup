@@ -1,5 +1,7 @@
 # Cloudflare Worker + KV Secret Flow
 
+> For the full Worker API reference, D1 schema, Durable Objects, and deployment guide see [`docs/CLOUDFLARE.md`](CLOUDFLARE.md).
+
 ## Goal
 Store encrypted credential blobs in Cloudflare KV and pull them onto new or existing machines without a browser.
 
@@ -61,3 +63,7 @@ Behavior:
 - Worker only stores encrypted blobs plus enrollment/bootstrap metadata.
 - `PI_SETUP_MASTER_KEY` must stay outside git and outside KV.
 - Never commit issued enrollment tokens or bootstrap tokens.
+
+## See also
+- [`docs/CLOUDFLARE.md`](CLOUDFLARE.md) — complete API reference and KV key layout
+- [`docs/FLEET.md`](FLEET.md) — fleet daemon and dashboard setup
